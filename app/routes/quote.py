@@ -29,9 +29,19 @@ from app.services import lifi
 from app.services import database
 from app.services.pyth import get_price_update, get_pyth_update_fee
 
+
 router = APIRouter(prefix="/v1/quote", tags=["quote"])
 
 PLACEHOLDER_SIGNATURE = b"\x00" * 65
+
+NATIVE_TOKEN_ADDRESSES = {
+    "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "0x0000000000000000000000000000000000000000",
+}
+
+
+def _is_native_token(address: str) -> bool:
+    return address.lower() in NATIVE_TOKEN_ADDRESSES
 
 
 def _compute_fee(amount: int) -> int:
@@ -170,7 +180,7 @@ async def get_quote(req: QuoteRequest):
         ),
         intent=intent,
         eip712=_build_eip712(intent, to_chain, deposit_router),
-        approval=ApprovalData(
+        approval=None if _is_native_token(req.from_token) else ApprovalData(
             token_address=req.from_token,
             spender_address=approval_target,
             amount=req.from_amount,
@@ -257,7 +267,6 @@ async def build_transaction(req: BuildRequest):
         deposit_router, calldata, contract_call_amount,
         preferred_bridges=preferred,
         slippage=req.slippage,
-        contract_call_value=str(pyth_fee),
     )
 
     if not cc_quote:
@@ -278,7 +287,7 @@ async def build_transaction(req: BuildRequest):
             chain_id=req.from_chain_id,
             gas_limit=tx_req.get("gasLimit"),
         ),
-        approval=ApprovalData(
+        approval=None if _is_native_token(req.from_token) else ApprovalData(
             token_address=req.from_token,
             spender_address=approval_target,
             amount=req.from_amount,

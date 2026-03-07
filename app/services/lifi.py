@@ -59,9 +59,23 @@ async def get_contract_calls_quote(
     contract_call_amount: str,
     preferred_bridges: list[str] | None = None,
     slippage: float = 0.03,
+    contract_call_value: str = "0",
 ) -> dict | None:
     client = get_client()
     is_same_chain = from_chain == to_chain
+
+    contract_call: dict = {
+        "fromAmount": contract_call_amount,
+        "fromTokenAddress": to_token,
+        "toTokenAddress": to_token,
+        "toContractAddress": contract_address,
+        "toContractCallData": contract_call_data,
+        "toContractGasLimit": "2000000",
+        "toApprovalAddress": contract_address,
+        "requiresDeposit": True,
+    }
+    if contract_call_value and contract_call_value != "0":
+        contract_call["toContractCallValue"] = contract_call_value
 
     body: dict = {
         "fromChain": from_chain,
@@ -71,18 +85,7 @@ async def get_contract_calls_quote(
         "toChain": to_chain,
         "toToken": to_token,
         "toAddress": from_address,
-        "contractCalls": [
-            {
-                "fromAmount": contract_call_amount,
-                "fromTokenAddress": to_token,
-                "toTokenAddress": to_token,
-                "toContractAddress": contract_address,
-                "toContractCallData": contract_call_data,
-                "toContractGasLimit": "2000000",
-                "toApprovalAddress": contract_address,
-                "requiresDeposit": True,
-            }
-        ],
+        "contractCalls": [contract_call],
         "slippage": slippage,
         "integrator": LIFI_INTEGRATOR,
     }

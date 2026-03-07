@@ -46,10 +46,11 @@ DEPOSIT_ROUTER_ABI = [
             },
             {"internalType": "bytes", "name": "signature", "type": "bytes"},
             {"internalType": "address", "name": "referrer", "type": "address"},
+            {"internalType": "bytes[]", "name": "priceUpdate", "type": "bytes[]"},
         ],
         "name": "depositWithIntentCrossChainERC4626",
         "outputs": [{"internalType": "bytes32", "name": "intentHash", "type": "bytes32"}],
-        "stateMutability": "nonpayable",
+        "stateMutability": "payable",
         "type": "function",
     },
     {
@@ -110,6 +111,16 @@ ERC4626_ABI = [
         "inputs": [],
         "name": "decimals",
         "outputs": [{"internalType": "uint8", "name": "", "type": "uint8"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+]
+
+PYTH_ABI = [
+    {
+        "inputs": [{"internalType": "bytes[]", "name": "updateData", "type": "bytes[]"}],
+        "name": "getUpdateFee",
+        "outputs": [{"internalType": "uint256", "name": "feeAmount", "type": "uint256"}],
         "stateMutability": "view",
         "type": "function",
     },

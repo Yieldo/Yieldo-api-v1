@@ -86,6 +86,7 @@ def encode_deposit_calldata(
     deadline: int,
     signature: bytes,
     referrer: str,
+    price_update: list[bytes] | None = None,
 ) -> str:
     router = get_deposit_router(chain_id)
     intent_tuple = (
@@ -96,9 +97,12 @@ def encode_deposit_calldata(
         nonce,
         deadline,
     )
+    args = [intent_tuple, signature, Web3.to_checksum_address(referrer)]
+    if price_update is not None:
+        args.append(price_update)
     return router.encode_abi(
         abi_element_identifier=fn_name,
-        args=[intent_tuple, signature, Web3.to_checksum_address(referrer)],
+        args=args,
     )
 
 

@@ -27,6 +27,7 @@ from app.services.vault import get_vault, get_vault_response
 from app.services.rpc import get_nonce, encode_deposit_calldata, get_vault_share_price
 from app.services import lifi
 from app.services import database
+from app.services.pyth import get_price_update, get_pyth_update_fee
 
 router = APIRouter(prefix="/v1/quote", tags=["quote"])
 
@@ -235,11 +236,14 @@ async def build_transaction(req: BuildRequest):
     if not lifi_quote:
         raise HTTPException(status_code=400, detail="No route found")
 
+    price_update = get_price_update(to_token)
+    pyth_fee = get_pyth_update_fee(to_chain, price_update)
+
     fn_name = "depositWithIntentCrossChainERC4626"
     calldata = encode_deposit_calldata(
         to_chain, fn_name, req.user_address, vault["address"],
         to_token, intent_amount, nonce, deadline,
-        sig_bytes, req.referrer,
+        sig_bytes, req.referrer, price_update,
     )
 
     contract_call_amount = str(intent_amount)
@@ -253,6 +257,7 @@ async def build_transaction(req: BuildRequest):
         deposit_router, calldata, contract_call_amount,
         preferred_bridges=preferred,
         slippage=req.slippage,
+        contract_call_value=str(pyth_fee),
     )
 
     if not cc_quote:

@@ -48,9 +48,13 @@ Yieldo supports a variety of vault standards and protocols:
 
 Vaults span multiple protocols and curators including Steakhouse, Gauntlet, Moonwell, Midas, Veda, Upshift, MEV Capital, and more. Use `GET /v1/vaults` to see the full list.
 
-### Fees
+### Revenue Share
 
-Yieldo charges a flat **10 bps (0.1%)** fee on the deposit amount, deducted before the vault deposit.
+Yieldo has agreements with curators and vault platforms to share revenue with wallets and distributors. **100% of curator revenue share is passed to the distributor.**
+
+On top of that, there's a flat **10 bps (0.1%)** fee on the deposit amount, deducted before the vault deposit. **50% of this fee goes to the wallet/distributor.**
+
+Individual campaigns to further incentivize deposits directly from wallets are coming soon.
 
 ## Quick Example
 

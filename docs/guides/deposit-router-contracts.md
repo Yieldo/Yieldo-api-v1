@@ -101,21 +101,23 @@ vault.requestDeposit(amount, recipient, controller)
 // Returns a requestId for later fulfillment
 ```
 
-## Fee System
+## Revenue Share & Fees
 
 ```
 feeAmount    = (amount * feeBps) / 10000    // Default: 10 bps (0.1%)
 depositAmount = amount - feeAmount
 ```
 
-**Fee distribution:**
+Yieldo has agreements with curators and vault platforms to share revenue with wallets and distributors. 100% of curator revenue share is passed to the distributor.
 
-| Scenario                 | Fee Collector | Referrer |
-| ------------------------ | ------------- | -------- |
-| No referrer              | 100%          | 0%       |
-| With referrer            | 50%           | 50%      |
+**On-chain fee distribution (10 bps):**
 
-Referrers earn 50% of the fee when a valid referrer address is provided. Referral earnings are tracked per token per referrer on-chain.
+| Scenario                          | Fee Collector | Wallet/Distributor |
+| --------------------------------- | ------------- | ------------------ |
+| No referrer                       | 100%          | 0%                 |
+| With referrer (wallet/distributor)| 50%           | 50%                |
+
+Wallets and distributors earn 50% of the on-chain fee by passing their address as the `referrer` parameter. Referral earnings are tracked per token per referrer on-chain.
 
 ## Cross-Chain Slippage Protection
 

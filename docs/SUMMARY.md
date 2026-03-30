@@ -14,4 +14,5 @@
 
 * [Deposit Flow](guides/deposit-flow.md)
 * [Cross-Chain Deposits](guides/cross-chain-deposits.md)
+* [Deposit Router Contracts](guides/deposit-router-contracts.md)
 * [Error Handling](guides/error-handling.md)

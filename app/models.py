@@ -49,6 +49,7 @@ class IntentData(BaseModel):
     amount: str
     nonce: str
     deadline: str
+    fee_bps: str = "10"
 
 
 class EIP712Domain(BaseModel):
@@ -102,6 +103,7 @@ class QuoteResponse(BaseModel):
     estimate: QuoteEstimate
     intent: IntentData
     eip712: EIP712Data
+    signature: str
     approval: Optional[ApprovalData] = None
 
 
@@ -115,6 +117,7 @@ class BuildRequest(BaseModel):
     intent_amount: str
     nonce: str
     deadline: str
+    fee_bps: str = "10"
     slippage: float = 0.03
     referrer: str = "0x0000000000000000000000000000000000000000"
 

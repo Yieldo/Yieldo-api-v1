@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     optimism_rpc_url: str = "https://mainnet.optimism.io"
     mongodb_url: str = ""
     intent_deadline_seconds: int = 3600
+    signer_private_key: str = ""
 
     class Config:
         env_file = ".env"

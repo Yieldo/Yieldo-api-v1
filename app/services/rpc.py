@@ -1,8 +1,15 @@
 from web3 import Web3
 from web3.contract import Contract
+from eth_account import Account
+from eth_account.messages import encode_typed_data
 from app.config import get_settings
 from app.core.abi import DEPOSIT_ROUTER_ABI, ERC4626_ABI, ERC20_ABI
-from app.core.constants import DEPOSIT_ROUTER_ADDRESSES
+from app.core.constants import (
+    DEPOSIT_ROUTER_ADDRESSES,
+    EIP712_DOMAIN_NAME,
+    EIP712_DOMAIN_VERSION,
+    EIP712_TYPES,
+)
 
 _providers: dict[int, Web3] = {}
 
@@ -75,6 +82,50 @@ def get_vault_share_price(chain_id: int, vault_address: str) -> tuple[int, int]:
     return total_assets, total_supply
 
 
+def sign_intent(
+    chain_id: int,
+    router_address: str,
+    user: str,
+    vault: str,
+    asset: str,
+    amount: int,
+    nonce: int,
+    deadline: int,
+    fee_bps: int,
+) -> str:
+    settings = get_settings()
+    typed_data = {
+        "types": {
+            "EIP712Domain": [
+                {"name": "name", "type": "string"},
+                {"name": "version", "type": "string"},
+                {"name": "chainId", "type": "uint256"},
+                {"name": "verifyingContract", "type": "address"},
+            ],
+            "DepositIntent": EIP712_TYPES["DepositIntent"],
+        },
+        "primaryType": "DepositIntent",
+        "domain": {
+            "name": EIP712_DOMAIN_NAME,
+            "version": EIP712_DOMAIN_VERSION,
+            "chainId": chain_id,
+            "verifyingContract": Web3.to_checksum_address(router_address),
+        },
+        "message": {
+            "user": Web3.to_checksum_address(user),
+            "vault": Web3.to_checksum_address(vault),
+            "asset": Web3.to_checksum_address(asset),
+            "amount": amount,
+            "nonce": nonce,
+            "deadline": deadline,
+            "feeBps": fee_bps,
+        },
+    }
+    signable = encode_typed_data(full_message=typed_data)
+    signed = Account.sign_message(signable, private_key=settings.signer_private_key)
+    return "0x" + signed.signature.hex()
+
+
 def encode_deposit_calldata(
     chain_id: int,
     fn_name: str,
@@ -84,6 +135,7 @@ def encode_deposit_calldata(
     amount: int,
     nonce: int,
     deadline: int,
+    fee_bps: int,
     signature: bytes,
     referrer: str,
     price_update: list[bytes] | None = None,
@@ -96,6 +148,7 @@ def encode_deposit_calldata(
         amount,
         nonce,
         deadline,
+        fee_bps,
     )
     args = [intent_tuple, signature, Web3.to_checksum_address(referrer)]
     if price_update is not None:
@@ -118,4 +171,5 @@ def get_deposit_record(chain_id: int, intent_hash: bytes) -> dict:
         "timestamp": result[5],
         "executed": result[6],
         "cancelled": result[7],
+        "fee_bps": result[8],
     }

@@ -24,7 +24,7 @@ from app.core.constants import (
 )
 from app.config import get_settings
 from app.services.vault import get_vault, get_vault_response
-from app.services.rpc import get_nonce, encode_deposit_calldata, get_vault_share_price
+from app.services.rpc import get_nonce, encode_deposit_calldata, get_vault_share_price, sign_intent
 from app.services import lifi
 from app.services import database
 from app.services.pyth import get_price_update, get_pyth_update_fee
@@ -44,8 +44,8 @@ def _is_native_token(address: str) -> bool:
     return address.lower() in NATIVE_TOKEN_ADDRESSES
 
 
-def _compute_fee(amount: int) -> int:
-    return (amount * FEE_BPS) // 10000
+def _compute_fee(amount: int, fee_bps: int = FEE_BPS) -> int:
+    return (amount * fee_bps) // 10000
 
 
 def _compute_shares(deposit_amount: int, total_assets: int, total_supply: int) -> int | None:
@@ -96,6 +96,11 @@ async def get_quote(req: QuoteRequest):
             amount=req.from_amount,
             nonce=str(nonce),
             deadline=str(deadline),
+            fee_bps=str(FEE_BPS),
+        )
+        sig = sign_intent(
+            to_chain, deposit_router, req.user_address, vault["address"],
+            to_token, from_amount_int, nonce, deadline, FEE_BPS,
         )
         response = QuoteResponse(
             quote_type=quote_type,
@@ -110,6 +115,7 @@ async def get_quote(req: QuoteRequest):
             ),
             intent=intent,
             eip712=_build_eip712(intent, to_chain, deposit_router),
+            signature=sig,
             approval=ApprovalData(
                 token_address=to_token,
                 spender_address=deposit_router,
@@ -156,6 +162,12 @@ async def get_quote(req: QuoteRequest):
         amount=str(intent_amount),
         nonce=str(nonce),
         deadline=str(deadline),
+        fee_bps=str(FEE_BPS),
+    )
+
+    sig = sign_intent(
+        to_chain, deposit_router, req.user_address, vault["address"],
+        to_token, intent_amount, nonce, deadline, FEE_BPS,
     )
 
     steps = [StepDetail(**s) for s in meta.get("steps", [])] if meta.get("steps") else None
@@ -180,6 +192,7 @@ async def get_quote(req: QuoteRequest):
         ),
         intent=intent,
         eip712=_build_eip712(intent, to_chain, deposit_router),
+        signature=sig,
         approval=None if _is_native_token(req.from_token) else ApprovalData(
             token_address=req.from_token,
             spender_address=approval_target,
@@ -203,17 +216,18 @@ async def build_transaction(req: BuildRequest):
     is_same_token = req.from_token.lower() == to_token.lower()
     is_direct = is_same_chain and is_same_token
 
-    # Use the EXACT values the user signed — never recompute these
+    # Use the EXACT values from the signed intent — never recompute these
     nonce = int(req.nonce)
     deadline = int(req.deadline)
     intent_amount = int(req.intent_amount)
+    fee_bps = int(req.fee_bps)
     sig_bytes = bytes.fromhex(req.signature.replace("0x", ""))
 
     if is_direct:
         fn_name = "depositWithIntentERC4626"
         calldata = encode_deposit_calldata(
             to_chain, fn_name, req.user_address, vault["address"],
-            to_token, intent_amount, nonce, deadline,
+            to_token, intent_amount, nonce, deadline, fee_bps,
             sig_bytes, req.referrer,
         )
         response = BuildResponse(
@@ -232,6 +246,7 @@ async def build_transaction(req: BuildRequest):
             intent=IntentData(
                 user=req.user_address, vault=vault["address"], asset=to_token,
                 amount=str(intent_amount), nonce=str(nonce), deadline=str(deadline),
+                fee_bps=str(fee_bps),
             ),
             tracking=TrackingInfo(from_chain_id=to_chain, to_chain_id=to_chain),
         )
@@ -252,7 +267,7 @@ async def build_transaction(req: BuildRequest):
     fn_name = "depositWithIntentCrossChainERC4626"
     calldata = encode_deposit_calldata(
         to_chain, fn_name, req.user_address, vault["address"],
-        to_token, intent_amount, nonce, deadline,
+        to_token, intent_amount, nonce, deadline, fee_bps,
         sig_bytes, req.referrer, price_update,
     )
 
@@ -295,6 +310,7 @@ async def build_transaction(req: BuildRequest):
         intent=IntentData(
             user=req.user_address, vault=vault["address"], asset=to_token,
             amount=str(intent_amount), nonce=str(nonce), deadline=str(deadline),
+            fee_bps=str(fee_bps),
         ),
         tracking=TrackingInfo(
             from_chain_id=req.from_chain_id,
@@ -319,3 +335,16 @@ def _build_eip712(intent: IntentData, chain_id: int, router_address: str) -> EIP
         types=EIP712_TYPES,
         message=intent,
     )
+
+
+def _intent_eip712_message(intent: IntentData) -> dict:
+    """Convert IntentData to EIP-712 message dict with correct field names."""
+    return {
+        "user": intent.user,
+        "vault": intent.vault,
+        "asset": intent.asset,
+        "amount": intent.amount,
+        "nonce": intent.nonce,
+        "deadline": intent.deadline,
+        "feeBps": intent.fee_bps,
+    }

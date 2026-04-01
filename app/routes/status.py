@@ -92,6 +92,7 @@ async def get_intent_status(
             "timestamp": str(record["timestamp"]),
             "executed": record["executed"],
             "cancelled": record["cancelled"],
+            "fee_bps": str(record["fee_bps"]),
             "explorer_link": _tx_link(chain_id, intent_hash),
         }
     except Exception as e:

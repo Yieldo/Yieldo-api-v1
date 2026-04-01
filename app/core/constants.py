@@ -1,13 +1,15 @@
 LIFI_BASE_URL = "https://li.quest/v1"
 LIFI_INTEGRATOR = "Yieldo"
 FEE_BPS = 10
-CROSS_CHAIN_SLIPPAGE_BUFFER = 0.95
+CROSS_CHAIN_SLIPPAGE_BUFFER = 0.99
 
 DEPOSIT_ROUTER_ADDRESSES: dict[int, str] = {
+    1: "0x85f76c1685046Ea226E1148EE1ab81a8a15C385d",
     8453: "0xF6B7723661d52E8533c77479d3cad534B4D147Aa",
 }
 
 PYTH_CONTRACT_ADDRESSES: dict[int, str] = {
+    1: "0x4305FB66699C3B2702D4d05CF36551390A4c69C6",
     8453: "0x8250f4aF4B972684F7b336503E2D6dFeDeB1487a",
 }
 
@@ -81,5 +83,6 @@ EIP712_TYPES = {
         {"name": "amount", "type": "uint256"},
         {"name": "nonce", "type": "uint256"},
         {"name": "deadline", "type": "uint256"},
+        {"name": "feeBps", "type": "uint256"},
     ]
 }

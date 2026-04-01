@@ -2,7 +2,7 @@
 
 ## Get Quote
 
-Returns a deposit quote with the estimated output, fees, and an EIP-712 intent for the user to sign.
+Returns a deposit quote with the estimated output, fees, a pre-signed intent, and a ready-to-use signature.
 
 ```
 POST /v1/quote
@@ -79,8 +79,10 @@ curl -X POST https://api.yieldo.xyz/v1/quote \
     "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     "amount": "969515000",
     "nonce": "0",
-    "deadline": "1711900000"
+    "deadline": "1711900000",
+    "fee_bps": "10"
   },
+  "signature": "0x...",
   "eip712": {
     "domain": {
       "name": "DepositRouter",
@@ -95,7 +97,8 @@ curl -X POST https://api.yieldo.xyz/v1/quote \
         { "name": "asset", "type": "address" },
         { "name": "amount", "type": "uint256" },
         { "name": "nonce", "type": "uint256" },
-        { "name": "deadline", "type": "uint256" }
+        { "name": "deadline", "type": "uint256" },
+        { "name": "feeBps", "type": "uint256" }
       ]
     },
     "primaryType": "DepositIntent",
@@ -105,7 +108,8 @@ curl -X POST https://api.yieldo.xyz/v1/quote \
       "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
       "amount": "969515000",
       "nonce": "0",
-      "deadline": "1711900000"
+      "deadline": "1711900000",
+      "fee_bps": "10"
     }
   },
   "approval": {
@@ -133,8 +137,8 @@ curl -X POST https://api.yieldo.xyz/v1/quote \
 | `to_amount`        | string      | Expected output in vault asset                 |
 | `to_amount_min`    | string      | Minimum output after slippage                  |
 | `deposit_amount`   | string      | Amount deposited into vault (after fee)        |
-| `fee_amount`       | string      | Fee deducted (10 bps)                          |
-| `fee_bps`          | int         | Fee in basis points (always `10`)              |
+| `fee_amount`       | string      | Fee deducted from deposit                      |
+| `fee_bps`          | int         | Fee in basis points                            |
 | `estimated_shares` | string/null | Estimated vault shares received                |
 | `price_impact`     | float/null  | Price impact of the swap                       |
 | `estimated_time`   | int/null    | Estimated time in seconds                      |
@@ -156,7 +160,7 @@ If `approval` is present (not null), the user must approve the `spender_address`
 
 ## Build Transaction
 
-After the user signs the EIP-712 intent, submit the signature to get a ready-to-send transaction.
+Submit the signature from the quote response to get a ready-to-send transaction.
 
 ```
 POST /v1/quote/build
@@ -171,14 +175,15 @@ POST /v1/quote/build
 | `from_amount`   | string | Yes      |                                              | Amount in raw token units                   |
 | `vault_id`      | string | Yes      |                                              | Target vault ID                             |
 | `user_address`  | string | Yes      |                                              | User's wallet address                       |
-| `signature`     | string | Yes      |                                              | EIP-712 signature from the user             |
-| `intent_amount` | string | Yes      |                                              | The `amount` from the signed intent         |
-| `nonce`         | string | Yes      |                                              | The `nonce` from the signed intent          |
-| `deadline`      | string | Yes      |                                              | The `deadline` from the signed intent       |
+| `signature`     | string | Yes      |                                              | The `signature` from the quote response     |
+| `intent_amount` | string | Yes      |                                              | The `amount` from the quote intent          |
+| `nonce`         | string | Yes      |                                              | The `nonce` from the quote intent           |
+| `deadline`      | string | Yes      |                                              | The `deadline` from the quote intent        |
+| `fee_bps`       | string | Yes      |                                              | The `fee_bps` from the quote intent         |
 | `slippage`      | float  | No       | `0.03`                                       | Slippage tolerance                          |
 | `referrer`      | string | No       | `0x0000000000000000000000000000000000000000`  | Referrer address                            |
 
-> **Important:** The `intent_amount`, `nonce`, and `deadline` must match the exact values the user signed. Do not recompute these.
+> **Important:** The `signature`, `intent_amount`, `nonce`, `deadline`, and `fee_bps` must match the exact values from the quote response. Do not recompute these.
 
 ### Example Request
 
@@ -191,10 +196,11 @@ curl -X POST https://api.yieldo.xyz/v1/quote/build \
     "from_amount": "1000000000",
     "vault_id": "base-steakhouse-prime-usdc",
     "user_address": "0xYourAddress",
-    "signature": "0xYourEIP712Signature...",
+    "signature": "<signature from quote response>",
     "intent_amount": "969515000",
     "nonce": "0",
-    "deadline": "1711900000"
+    "deadline": "1711900000",
+    "fee_bps": "10"
   }'
 ```
 
@@ -220,7 +226,8 @@ curl -X POST https://api.yieldo.xyz/v1/quote/build \
     "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     "amount": "969515000",
     "nonce": "0",
-    "deadline": "1711900000"
+    "deadline": "1711900000",
+    "fee_bps": "10"
   },
   "tracking": {
     "from_chain_id": 42161,

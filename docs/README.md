@@ -11,16 +11,15 @@ https://api.yieldo.xyz
 ## How It Works
 
 1. **Browse vaults** - Query available vaults across chains and protocols
-2. **Get a quote** - Submit your source chain, token, and amount to receive a deposit quote with an EIP-712 intent to sign
-3. **Sign the intent** - The user signs the EIP-712 typed data in their wallet
-4. **Build the transaction** - Submit the signature to get a ready-to-send transaction
-5. **Track status** - Monitor the deposit progress through bridging and execution
+2. **Get a quote** - Submit your source chain, token, and amount to receive a deposit quote with a pre-signed intent
+3. **Build the transaction** - Submit the quote data to get a ready-to-send transaction
+4. **Send & track** - Send the transaction and monitor the deposit progress
 
 ## Key Concepts
 
 ### Intent-Based Deposits
 
-Yieldo uses an intent-based system where users sign a `DepositIntent` via EIP-712. This intent authorizes the deposit router contract to deposit funds into a vault on the user's behalf. The intent includes a deadline and nonce for replay protection.
+Yieldo uses an intent-based system with EIP-712 signed `DepositIntent` messages. When you request a quote, the API returns a pre-signed intent and signature — no wallet signing is required from the user. The intent authorizes the deposit router contract to deposit funds into a vault on the user's behalf. Each intent includes a deadline and nonce for replay protection.
 
 ### Cross-Chain Routing
 
@@ -73,7 +72,7 @@ curl -X POST https://api.yieldo.xyz/v1/quote \
     "user_address": "0xYourAddress"
   }'
 
-# 3. Sign the returned EIP-712 data, then build the transaction
+# 3. Build the transaction using the signature from the quote response
 curl -X POST https://api.yieldo.xyz/v1/quote/build \
   -H "Content-Type: application/json" \
   -d '{
@@ -82,9 +81,10 @@ curl -X POST https://api.yieldo.xyz/v1/quote/build \
     "from_amount": "1000000000",
     "vault_id": "base-steakhouse-prime-usdc",
     "user_address": "0xYourAddress",
-    "signature": "0xYourSignature...",
+    "signature": "<signature from quote response>",
     "intent_amount": "997000000",
     "nonce": "0",
-    "deadline": "1711900000"
+    "deadline": "1711900000",
+    "fee_bps": "10"
   }'
 ```

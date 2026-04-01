@@ -1,6 +1,6 @@
 # Deposit Router Contracts
 
-The Deposit Router is the core smart contract that executes vault deposits on behalf of users. It uses an intent-based architecture where users sign an EIP-712 message authorizing a deposit, and the router executes it.
+The Deposit Router is the core smart contract that executes vault deposits on behalf of users. It uses an intent-based architecture with EIP-712 signed messages that authorize deposits, and the router executes them.
 
 ## Contract Addresses
 
@@ -21,10 +21,11 @@ struct DepositIntent {
     uint256 amount;     // Amount to deposit
     uint256 nonce;      // Per-user nonce (replay protection)
     uint256 deadline;   // Unix timestamp after which intent expires
+    uint256 feeBps;     // Fee in basis points (e.g. 10 = 0.1%)
 }
 ```
 
-The intent is signed via **EIP-712** (`eth_signTypedData_v4`) with domain:
+The intent is signed via **EIP-712** with domain:
 
 ```
 name: "DepositRouter"
@@ -38,11 +39,11 @@ verifyingContract: <deposit router address>
 ### Same-Chain Deposits
 
 ```
-User signs intent → Approve token → Send tx to router
+Get quote (includes signed intent) → Approve token → Send tx to router
                                           ↓
                               Router pulls tokens from user
                                           ↓
-                              Fee deducted (10 bps)
+                              Fee deducted (per intent feeBps)
                                           ↓
                               Tokens deposited into vault
                                           ↓
@@ -54,7 +55,7 @@ The router calls `safeTransferFrom` to pull tokens from the user, deducts the fe
 ### Cross-Chain Deposits
 
 ```
-User signs intent → Approve token → Send bridge tx (source chain)
+Get quote (includes signed intent) → Approve token → Send bridge tx (source chain)
                                           ↓
                               LiFi bridges tokens to destination chain
                                           ↓
@@ -62,7 +63,7 @@ User signs intent → Approve token → Send bridge tx (source chain)
                                           ↓
                               Slippage validated via oracle
                                           ↓
-                              Fee deducted (10 bps)
+                              Fee deducted (per intent feeBps)
                                           ↓
                               Tokens deposited into vault
                                           ↓
@@ -104,13 +105,13 @@ vault.requestDeposit(amount, recipient, controller)
 ## Revenue Share & Fees
 
 ```
-feeAmount    = (amount * feeBps) / 10000    // Default: 10 bps (0.1%)
+feeAmount    = (amount * feeBps) / 10000    // feeBps set per intent (e.g. 10 = 0.1%)
 depositAmount = amount - feeAmount
 ```
 
 Yieldo has agreements with curators and vault platforms to share revenue with wallets and distributors. 100% of curator revenue share is passed to the distributor.
 
-**On-chain fee distribution (10 bps):**
+**On-chain fee distribution:**
 
 | Scenario                          | Fee Collector | Wallet/Distributor |
 | --------------------------------- | ------------- | ------------------ |

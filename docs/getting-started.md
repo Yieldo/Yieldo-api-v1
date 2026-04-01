@@ -73,20 +73,17 @@ The response includes:
 
 * **estimate** - Expected output amounts, fees, and estimated shares
 * **intent** - The `DepositIntent` data
-* **eip712** - Full EIP-712 typed data for the user to sign
+* **signature** - Pre-signed EIP-712 signature (ready to use, no wallet signing needed)
+* **eip712** - Full EIP-712 typed data (for reference)
 * **approval** - Token approval details (if needed)
 
 ### Step 4: Token Approval
 
 If the response includes an `approval` object, the user must approve the specified `spender_address` to spend their tokens before submitting the transaction.
 
-### Step 5: Sign the Intent
+### Step 5: Build the Transaction
 
-Have the user sign the `eip712` typed data using `eth_signTypedData_v4` in their wallet.
-
-### Step 6: Build the Transaction
-
-Submit the signature along with the quote parameters to build the final transaction.
+Submit the signature and intent data from the quote response to build the final transaction.
 
 ```bash
 POST /v1/quote/build
@@ -96,18 +93,19 @@ POST /v1/quote/build
   "from_amount": "1000000000",
   "vault_id": "base-steakhouse-prime-usdc",
   "user_address": "0x...",
-  "signature": "0x...",
+  "signature": "<signature from quote response>",
   "intent_amount": "997000000",
   "nonce": "0",
-  "deadline": "1711900000"
+  "deadline": "1711900000",
+  "fee_bps": "10"
 }
 ```
 
-### Step 7: Send the Transaction
+### Step 6: Send the Transaction
 
 Send the returned `transaction_request` using the user's wallet (`eth_sendTransaction`).
 
-### Step 8: Track Status
+### Step 7: Track Status
 
 For cross-chain deposits, poll the status endpoint:
 

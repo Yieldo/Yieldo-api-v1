@@ -5,7 +5,7 @@ This guide walks through the complete deposit flow for integrating Yieldo into a
 ## Overview
 
 ```
-User selects vault → Get quote → Approve token → Sign intent → Build tx → Send tx → Track status
+User selects vault → Get quote → Approve token → Build tx → Send tx → Track status
 ```
 
 ## Step 1: Select a Vault
@@ -39,7 +39,8 @@ const quoteData = await quote.json();
 The response contains:
 - **`estimate`** - Shows the expected output, fees, and estimated shares
 - **`intent`** - The deposit intent data
-- **`eip712`** - The typed data to sign
+- **`signature`** - Pre-signed EIP-712 signature (ready to use)
+- **`eip712`** - The typed data (for reference)
 - **`approval`** - Token approval details (if needed)
 
 ## Step 3: Approve Token Spending
@@ -60,22 +61,9 @@ if (quoteData.approval) {
 
 > **Tip:** For native token deposits (e.g., ETH), the `approval` field will be `null` and you can skip this step.
 
-## Step 4: Sign the EIP-712 Intent
+## Step 4: Build the Transaction
 
-Ask the user to sign the typed data returned in the quote.
-
-```javascript
-const signature = await walletClient.signTypedData({
-  domain: quoteData.eip712.domain,
-  types: quoteData.eip712.types,
-  primaryType: quoteData.eip712.primaryType,
-  message: quoteData.eip712.message,
-});
-```
-
-## Step 5: Build the Transaction
-
-Submit the signature to get the final transaction.
+Submit the signature and intent data from the quote response to get the final transaction. No wallet signing is needed — the quote response includes a pre-signed signature.
 
 ```javascript
 const buildResponse = await fetch('https://api.yieldo.xyz/v1/quote/build', {
@@ -87,16 +75,17 @@ const buildResponse = await fetch('https://api.yieldo.xyz/v1/quote/build', {
     from_amount: '1000000000',
     vault_id: 'base-steakhouse-prime-usdc',
     user_address: userAddress,
-    signature: signature,
+    signature: quoteData.signature,
     intent_amount: quoteData.intent.amount,
     nonce: quoteData.intent.nonce,
     deadline: quoteData.intent.deadline,
+    fee_bps: quoteData.intent.fee_bps,
   }),
 });
 const buildData = await buildResponse.json();
 ```
 
-## Step 6: Send the Transaction
+## Step 5: Send the Transaction
 
 Send the transaction using the user's wallet.
 
@@ -112,7 +101,7 @@ const txHash = await walletClient.sendTransaction({
 });
 ```
 
-## Step 7: Track the Deposit
+## Step 6: Track the Deposit
 
 For cross-chain deposits, poll the status endpoint until the transfer completes.
 
@@ -142,7 +131,7 @@ async function pollStatus(txHash, fromChainId, toChainId) {
 
 ```javascript
 async function deposit(vaultId, fromChainId, fromToken, amount, userAddress) {
-  // 1. Get quote
+  // 1. Get quote (includes pre-signed signature)
   const quote = await getQuote(fromChainId, fromToken, amount, vaultId, userAddress);
 
   // 2. Approve if needed
@@ -150,22 +139,20 @@ async function deposit(vaultId, fromChainId, fromToken, amount, userAddress) {
     await approveToken(quote.approval);
   }
 
-  // 3. Sign intent
-  const signature = await signIntent(quote.eip712);
-
-  // 4. Build transaction
+  // 3. Build transaction (no wallet signing needed)
   const build = await buildTransaction({
     fromChainId, fromToken, amount, vaultId, userAddress,
-    signature,
+    signature: quote.signature,
     intentAmount: quote.intent.amount,
     nonce: quote.intent.nonce,
     deadline: quote.intent.deadline,
+    feeBps: quote.intent.fee_bps,
   });
 
-  // 5. Send transaction
+  // 4. Send transaction
   const txHash = await sendTransaction(build.transaction_request);
 
-  // 6. Track (cross-chain only)
+  // 5. Track (cross-chain only)
   if (fromChainId !== quote.vault.chain_id) {
     await pollStatus(txHash, fromChainId, quote.vault.chain_id);
   }

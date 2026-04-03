@@ -15,7 +15,7 @@ async def connect(url: str):
     global _client, _db
     try:
         _client = AsyncIOMotorClient(url)
-        _db = _client["yieldo"]
+        _db = _client["yieldo_partners"]
         await _ensure_indexes()
         logger.info("MongoDB connected")
     except Exception as e:

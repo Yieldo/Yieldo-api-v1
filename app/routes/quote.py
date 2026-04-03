@@ -1,5 +1,5 @@
 import time
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from app.models import (
     QuoteRequest,
     QuoteResponse,
@@ -28,6 +28,7 @@ from app.services.rpc import get_nonce, encode_deposit_calldata, get_vault_share
 from app.services import lifi
 from app.services import database
 from app.services.pyth import get_price_update, get_pyth_update_fee
+from app.routes.partners import get_partner_from_api_key
 
 
 router = APIRouter(prefix="/v1/quote", tags=["quote"])
@@ -56,7 +57,16 @@ def _compute_shares(deposit_amount: int, total_assets: int, total_supply: int) -
 
 
 @router.post("", response_model=QuoteResponse)
-async def get_quote(req: QuoteRequest):
+async def get_quote(req: QuoteRequest, request: Request):
+    # Detect partner from API key headers
+    partner = await get_partner_from_api_key(request)
+    if partner:
+        fee_bps = FEE_BPS if partner.get("fee_enabled", True) else 0
+        referrer = partner.get("fee_collector_address", partner["address"])
+        req.referrer = referrer
+    else:
+        fee_bps = FEE_BPS
+
     vault = get_vault(req.vault_id)
     if not vault:
         raise HTTPException(status_code=404, detail=f"Vault {req.vault_id} not found")
@@ -86,7 +96,7 @@ async def get_quote(req: QuoteRequest):
         total_assets, total_supply = 0, 0
 
     if is_direct:
-        fee = _compute_fee(from_amount_int)
+        fee = _compute_fee(from_amount_int, fee_bps)
         deposit_amount = from_amount_int - fee
         estimated_shares = _compute_shares(deposit_amount, total_assets, total_supply)
         intent = IntentData(
@@ -96,11 +106,11 @@ async def get_quote(req: QuoteRequest):
             amount=req.from_amount,
             nonce=str(nonce),
             deadline=str(deadline),
-            fee_bps=str(FEE_BPS),
+            fee_bps=str(fee_bps),
         )
         sig = sign_intent(
             to_chain, deposit_router, req.user_address, vault["address"],
-            to_token, from_amount_int, nonce, deadline, FEE_BPS,
+            to_token, from_amount_int, nonce, deadline, fee_bps,
         )
         response = QuoteResponse(
             quote_type=quote_type,
@@ -123,6 +133,11 @@ async def get_quote(req: QuoteRequest):
             ),
         )
         await database.save_quote(req.model_dump(), response.model_dump())
+        if partner:
+            await database.save_partner_transaction(
+                partner["address"], req.user_address, req.vault_id,
+                req.from_chain_id, req.from_amount, quote_type, str(fee),
+            )
         return response
 
     lifi_quote = await lifi.get_quote(
@@ -144,7 +159,7 @@ async def get_quote(req: QuoteRequest):
     if to_amount_int == 0:
         raise HTTPException(status_code=400, detail="LiFi returned zero output amount")
 
-    fee = _compute_fee(to_amount_int)
+    fee = _compute_fee(to_amount_int, fee_bps)
     deposit_amount = to_amount_int - fee
 
     if not is_same_chain:
@@ -162,12 +177,12 @@ async def get_quote(req: QuoteRequest):
         amount=str(intent_amount),
         nonce=str(nonce),
         deadline=str(deadline),
-        fee_bps=str(FEE_BPS),
+        fee_bps=str(fee_bps),
     )
 
     sig = sign_intent(
         to_chain, deposit_router, req.user_address, vault["address"],
-        to_token, intent_amount, nonce, deadline, FEE_BPS,
+        to_token, intent_amount, nonce, deadline, fee_bps,
     )
 
     steps = [StepDetail(**s) for s in meta.get("steps", [])] if meta.get("steps") else None
@@ -200,11 +215,21 @@ async def get_quote(req: QuoteRequest):
         ),
     )
     await database.save_quote(req.model_dump(), response.model_dump())
+    if partner:
+        await database.save_partner_transaction(
+            partner["address"], req.user_address, req.vault_id,
+            req.from_chain_id, req.from_amount, quote_type, str(fee),
+        )
     return response
 
 
 @router.post("/build", response_model=BuildResponse)
-async def build_transaction(req: BuildRequest):
+async def build_transaction(req: BuildRequest, request: Request):
+    # Detect partner and override referrer
+    partner = await get_partner_from_api_key(request)
+    if partner:
+        req.referrer = partner.get("fee_collector_address", partner["address"])
+
     vault = get_vault(req.vault_id)
     if not vault:
         raise HTTPException(status_code=404, detail=f"Vault {req.vault_id} not found")

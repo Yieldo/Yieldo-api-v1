@@ -48,6 +48,27 @@ async def _ensure_indexes():
         await transactions.create_index("created_at")
         await transactions.create_index("status")
         await transactions.create_index("tx_hash")
+
+        # Partner indexes
+        partners = _db["partners"]
+        await partners.create_index("address", unique=True)
+        await partners.create_index("api_key_hash")
+
+        nonces = _db["partner_nonces"]
+        await nonces.create_index("address")
+        await nonces.create_index("created_at", expireAfterSeconds=300)
+
+        sessions = _db["partner_sessions"]
+        await sessions.create_index("token_hash")
+        await sessions.create_index("expires_at", expireAfterSeconds=0)
+
+        ptx = _db["partner_transactions"]
+        await ptx.create_index("partner_address")
+        await ptx.create_index("user_address")
+        await ptx.create_index("created_at")
+
+        pusers = _db["partner_users"]
+        await pusers.create_index([("partner_address", 1), ("user_address", 1)], unique=True)
     except Exception as e:
         logger.error(f"MongoDB index creation failed: {e}")
 
@@ -126,3 +147,203 @@ async def update_transaction_status(
         )
     except Exception as e:
         logger.error(f"Failed to update transaction status: {e}")
+
+
+# ========== Partner / Wallet Provider ==========
+
+async def save_nonce(address: str, nonce: str):
+    if not _db:
+        return
+    await _db["partner_nonces"].insert_one({
+        "address": address.lower(),
+        "nonce": nonce,
+        "created_at": datetime.now(timezone.utc),
+    })
+
+
+async def get_and_delete_nonce(address: str) -> Optional[str]:
+    if not _db:
+        return None
+    doc = await _db["partner_nonces"].find_one_and_delete(
+        {"address": address.lower()},
+        sort=[("created_at", -1)],
+    )
+    return doc["nonce"] if doc else None
+
+
+async def create_partner(
+    address: str, name: str, website: str, contact_email: str,
+    description: str, api_key_hash: str, api_secret_hash: str,
+    api_key_prefix: str,
+) -> dict:
+    if not _db:
+        return {}
+    now = datetime.now(timezone.utc)
+    doc = {
+        "address": address.lower(),
+        "name": name,
+        "website": website,
+        "contact_email": contact_email,
+        "description": description,
+        "fee_enabled": True,
+        "fee_collector_address": address.lower(),
+        "webhook_url": "",
+        "enrolled_vaults": [],
+        "api_key_hash": api_key_hash,
+        "api_secret_hash": api_secret_hash,
+        "api_key_prefix": api_key_prefix,
+        "status": "active",
+        "created_at": now,
+        "updated_at": now,
+    }
+    await _db["partners"].insert_one(doc)
+    return doc
+
+
+async def get_partner_by_address(address: str) -> Optional[dict]:
+    if not _db:
+        return None
+    return await _db["partners"].find_one({"address": address.lower()})
+
+
+async def get_partner_by_api_key(api_key_hash: str) -> Optional[dict]:
+    if not _db:
+        return None
+    return await _db["partners"].find_one({
+        "api_key_hash": api_key_hash,
+        "status": "active",
+    })
+
+
+async def update_partner(address: str, fields: dict):
+    if not _db:
+        return
+    fields["updated_at"] = datetime.now(timezone.utc)
+    await _db["partners"].update_one(
+        {"address": address.lower()},
+        {"$set": fields},
+    )
+
+
+async def rotate_partner_keys(address: str, api_key_hash: str, api_secret_hash: str, api_key_prefix: str):
+    if not _db:
+        return
+    await update_partner(address, {
+        "api_key_hash": api_key_hash,
+        "api_secret_hash": api_secret_hash,
+        "api_key_prefix": api_key_prefix,
+    })
+
+
+async def save_session(token_hash: str, address: str, expires_at: datetime) -> None:
+    if not _db:
+        return
+    await _db["partner_sessions"].insert_one({
+        "token_hash": token_hash,
+        "address": address.lower(),
+        "created_at": datetime.now(timezone.utc),
+        "expires_at": expires_at,
+    })
+
+
+async def get_session(token_hash: str) -> Optional[dict]:
+    if not _db:
+        return None
+    now = datetime.now(timezone.utc)
+    return await _db["partner_sessions"].find_one({
+        "token_hash": token_hash,
+        "expires_at": {"$gt": now},
+    })
+
+
+async def delete_sessions(address: str):
+    if not _db:
+        return
+    await _db["partner_sessions"].delete_many({"address": address.lower()})
+
+
+async def save_partner_transaction(
+    partner_address: str, user_address: str, vault_id: str,
+    from_chain_id: int, from_amount: str, quote_type: str,
+    fee_amount: str = "0",
+):
+    if not _db:
+        return
+    now = datetime.now(timezone.utc)
+    await _db["partner_transactions"].insert_one({
+        "partner_address": partner_address.lower(),
+        "user_address": user_address.lower(),
+        "vault_id": vault_id,
+        "from_chain_id": from_chain_id,
+        "from_amount": from_amount,
+        "quote_type": quote_type,
+        "status": "pending",
+        "fee_amount": fee_amount,
+        "created_at": now,
+    })
+    # Track unique user
+    try:
+        await _db["partner_users"].update_one(
+            {"partner_address": partner_address.lower(), "user_address": user_address.lower()},
+            {
+                "$set": {"last_seen": now},
+                "$setOnInsert": {"first_seen": now},
+                "$inc": {"total_deposits": 1},
+            },
+            upsert=True,
+        )
+    except Exception:
+        pass
+
+
+async def get_partner_dashboard(address: str) -> dict:
+    if not _db:
+        return {}
+    addr = address.lower()
+    coll = _db["partner_transactions"]
+    users_coll = _db["partner_users"]
+
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    week_ago = now - timedelta(days=7)
+
+    total = await coll.count_documents({"partner_address": addr})
+    successful = await coll.count_documents({"partner_address": addr, "status": {"$in": ["completed", "pending"]}})
+    failed = await coll.count_documents({"partner_address": addr, "status": "failed"})
+    txns_7d = await coll.count_documents({"partner_address": addr, "created_at": {"$gte": week_ago}})
+    total_users = await users_coll.count_documents({"partner_address": addr})
+    users_7d = await users_coll.count_documents({"partner_address": addr, "last_seen": {"$gte": week_ago}})
+
+    # Sum volume and fees
+    pipeline = [
+        {"$match": {"partner_address": addr}},
+        {"$group": {
+            "_id": None,
+            "total_volume": {"$sum": {"$toLong": "$from_amount"}},
+            "total_fees": {"$sum": {"$toLong": "$fee_amount"}},
+        }},
+    ]
+    agg = await coll.aggregate(pipeline).to_list(1)
+    vol = str(agg[0]["total_volume"]) if agg else "0"
+    fees = str(agg[0]["total_fees"]) if agg else "0"
+
+    return {
+        "total_transactions": total,
+        "successful_transactions": successful,
+        "failed_transactions": failed,
+        "total_volume": vol,
+        "total_users": total_users,
+        "total_fee_earned": fees,
+        "transactions_7d": txns_7d,
+        "users_7d": users_7d,
+    }
+
+
+async def get_partner_transactions(address: str, limit: int = 50, skip: int = 0) -> list[dict]:
+    if not _db:
+        return []
+    cursor = _db["partner_transactions"].find(
+        {"partner_address": address.lower()},
+        {"_id": 0},
+    ).sort("created_at", -1).skip(skip).limit(limit)
+    return await cursor.to_list(limit)

@@ -180,3 +180,99 @@ class TokenInfo(BaseModel):
 class ErrorResponse(BaseModel):
     error: str
     detail: Optional[str] = None
+
+
+# ========== Partner / Wallet Provider Models ==========
+
+class PartnerNonceRequest(BaseModel):
+    address: str
+
+
+class PartnerNonceResponse(BaseModel):
+    nonce: str
+    message: str
+
+
+class PartnerRegisterRequest(BaseModel):
+    address: str
+    signature: str
+    name: str
+    website: str = ""
+    contact_email: str = ""
+    description: str = ""
+
+
+class PartnerRegisterResponse(BaseModel):
+    address: str
+    name: str
+    api_key: str
+    api_secret: str
+    api_key_prefix: str
+    created_at: str
+
+
+class PartnerLoginRequest(BaseModel):
+    address: str
+    signature: str
+
+
+class PartnerLoginResponse(BaseModel):
+    session_token: str
+    expires_at: str
+    partner: dict
+
+
+class PartnerProfile(BaseModel):
+    address: str
+    name: str
+    website: str = ""
+    contact_email: str = ""
+    description: str = ""
+    fee_enabled: bool = True
+    fee_collector_address: str = ""
+    webhook_url: str = ""
+    enrolled_vaults: list[str] = []
+    api_key_prefix: str = ""
+    created_at: str = ""
+    status: str = "active"
+
+
+class PartnerSettingsUpdate(BaseModel):
+    fee_enabled: Optional[bool] = None
+    fee_collector_address: Optional[str] = None
+    webhook_url: Optional[str] = None
+    name: Optional[str] = None
+    website: Optional[str] = None
+    contact_email: Optional[str] = None
+
+
+class PartnerVaultsUpdate(BaseModel):
+    enrolled_vaults: list[str]
+
+
+class PartnerDashboardResponse(BaseModel):
+    total_transactions: int = 0
+    successful_transactions: int = 0
+    failed_transactions: int = 0
+    total_volume: str = "0"
+    total_users: int = 0
+    total_fee_earned: str = "0"
+    transactions_7d: int = 0
+    users_7d: int = 0
+
+
+class PartnerTransactionEntry(BaseModel):
+    user_address: str
+    vault_id: str
+    from_chain_id: int
+    from_amount: str
+    quote_type: str
+    status: str
+    fee_amount: str = "0"
+    created_at: str
+
+
+class PartnerAPIKeyRotateResponse(BaseModel):
+    api_key: str
+    api_secret: str
+    api_key_prefix: str

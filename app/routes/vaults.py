@@ -1,13 +1,15 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from app.models import VaultResponse, VaultDetailResponse
 from app.services.vault import get_all_vaults, get_vault, get_vault_response
 from app.services.rpc import get_vault_share_price
+from app.routes.partners import get_partner_from_api_key
 
 router = APIRouter(prefix="/v1/vaults", tags=["vaults"])
 
 
 @router.get("", response_model=list[VaultResponse])
 async def list_vaults(
+    request: Request,
     chain_id: int | None = Query(None, description="Filter by chain ID"),
     asset: str | None = Query(None, description="Filter by asset symbol"),
 ):
@@ -16,6 +18,12 @@ async def list_vaults(
         vaults = [v for v in vaults if v.chain_id == chain_id]
     if asset is not None:
         vaults = [v for v in vaults if v.asset.symbol.lower() == asset.lower()]
+    # Filter by enrolled vaults when partner API key is provided
+    partner = await get_partner_from_api_key(request)
+    if partner:
+        enrolled = partner.get("enrolled_vaults", [])
+        if enrolled:
+            vaults = [v for v in vaults if v.vault_id in enrolled]
     return vaults
 
 

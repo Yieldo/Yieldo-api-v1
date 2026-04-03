@@ -64,6 +64,10 @@ async def get_quote(req: QuoteRequest, request: Request):
         fee_bps = FEE_BPS if partner.get("fee_enabled", True) else 0
         referrer = partner.get("fee_collector_address", partner["address"])
         req.referrer = referrer
+        # Enforce enrollment
+        enrolled = partner.get("enrolled_vaults", [])
+        if enrolled and req.vault_id not in enrolled:
+            raise HTTPException(status_code=403, detail=f"Vault {req.vault_id} not in your enrolled vaults")
     else:
         fee_bps = FEE_BPS
 

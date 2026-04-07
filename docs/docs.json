@@ -10,8 +10,8 @@
   },
   "favicon": "/yieldo-favicon.png",
   "logo": {
-    "light": "/yieldo-logo.png",
-    "dark": "/yieldo-logo.png"
+    "light": "/yieldo-favicon.png",
+    "dark": "/yieldo-favicon.png"
   },
   "navigation": {
     "tabs": [

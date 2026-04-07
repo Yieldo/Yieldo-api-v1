@@ -1,0 +1,73 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Yieldo",
+  "description": "Cross-chain deposit aggregator for ERC-4626 and custom yield vaults",
+  "colors": {
+    "primary": "#7A1CCB",
+    "light": "#9E3BFF",
+    "dark": "#4B0CA6"
+  },
+  "favicon": "/yieldo-favicon.png",
+  "logo": {
+    "light": "/yieldo-logo.png",
+    "dark": "/yieldo-logo.png"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "README",
+              "getting-started"
+            ]
+          },
+          {
+            "group": "API Reference",
+            "pages": [
+              "api-reference/vaults",
+              "api-reference/quote",
+              "api-reference/status",
+              "api-reference/chains-and-tokens"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/deposit-flow",
+              "guides/cross-chain-deposits",
+              "guides/deposit-router-contracts",
+              "guides/error-handling"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Playground",
+        "openapi": "https://api.yieldo.xyz/openapi.json"
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "API Status",
+        "href": "https://api.yieldo.xyz/health"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Get Started",
+      "href": "https://app.yieldo.xyz"
+    }
+  },
+  "footer": {
+    "socials": {
+      "website": "https://yieldo.xyz",
+      "github": "https://github.com/Yieldo"
+    }
+  }
+}

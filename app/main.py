@@ -19,9 +19,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Yieldo API",
-    description="Deposit into Morpho vaults from any chain/token via LiFi",
+    description="Cross-chain deposit aggregator for ERC-4626 and custom yield vaults",
     version="1.0.0",
     lifespan=lifespan,
+    servers=[
+        {"url": "https://api.yieldo.xyz", "description": "Production"},
+    ],
 )
 
 app.add_middleware(

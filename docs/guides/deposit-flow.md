@@ -1,4 +1,7 @@
-# Deposit Flow
+---
+title: "Deposit Flow"
+description: "Complete deposit flow for integrating Yieldo into a frontend application"
+---
 
 This guide walks through the complete deposit flow for integrating Yieldo into a frontend application.
 

@@ -1,4 +1,7 @@
-# Deposit Router Contracts
+---
+title: "Deposit Router Contracts"
+description: "Smart contract architecture, intent system, and vault integrations"
+---
 
 The Deposit Router is the core smart contract that executes vault deposits on behalf of users. It uses an intent-based architecture with EIP-712 signed messages that authorize deposits, and the router executes them.
 

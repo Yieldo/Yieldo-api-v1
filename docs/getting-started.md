@@ -1,4 +1,7 @@
-# Getting Started
+---
+title: "Getting Started"
+description: "Auth, request format, and a full integration walkthrough"
+---
 
 ## Authentication
 

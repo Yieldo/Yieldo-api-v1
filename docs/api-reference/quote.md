@@ -1,4 +1,7 @@
-# Quote & Build
+---
+title: "Quote & Build"
+description: "Get a deposit quote with a pre-signed intent, then build the transaction"
+---
 
 ## Get Quote
 

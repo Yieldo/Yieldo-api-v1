@@ -1,4 +1,7 @@
-# Chains & Tokens
+---
+title: "Chains & Tokens"
+description: "Supported blockchain networks and source tokens"
+---
 
 ## List Chains
 

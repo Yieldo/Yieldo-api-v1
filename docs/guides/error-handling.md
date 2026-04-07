@@ -1,4 +1,7 @@
-# Error Handling
+---
+title: "Error Handling"
+description: "Common errors, HTTP status codes, and best practices"
+---
 
 ## Error Response Format
 

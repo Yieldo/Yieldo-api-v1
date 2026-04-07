@@ -1,4 +1,7 @@
-# Cross-Chain Deposits
+---
+title: "Cross-Chain Deposits"
+description: "How cross-chain deposits work - bridging, slippage, and tracking"
+---
 
 This guide covers the specifics of cross-chain deposits, where the user's tokens originate on a different chain than the target vault.
 

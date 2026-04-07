@@ -1,4 +1,7 @@
-# Vaults
+---
+title: "Vaults"
+description: "List and inspect available yield vaults"
+---
 
 ## List Vaults
 

@@ -34,7 +34,7 @@ async def disconnect():
 
 
 async def _ensure_indexes():
-    if not _db:
+    if _db is None:
         return
     try:
         quotes = _db["quotes"]
@@ -95,7 +95,7 @@ async def _ensure_indexes():
 
 
 async def save_quote(request_dict: dict, response_dict: dict) -> Optional[str]:
-    if not _db:
+    if _db is None:
         return None
     try:
         doc = {
@@ -114,7 +114,7 @@ async def save_quote(request_dict: dict, response_dict: dict) -> Optional[str]:
 
 
 async def save_transaction(request_dict: dict, response_dict: dict) -> Optional[str]:
-    if not _db:
+    if _db is None:
         return None
     try:
         now = datetime.now(timezone.utc)
@@ -144,7 +144,7 @@ async def update_transaction_status(
     new_status: str,
     extra_fields: Optional[dict] = None,
 ):
-    if not _db:
+    if _db is None:
         return
     try:
         now = datetime.now(timezone.utc)
@@ -173,7 +173,7 @@ async def update_transaction_status(
 # ========== Partner / Wallet Provider ==========
 
 async def save_nonce(address: str, nonce: str):
-    if not _db:
+    if _db is None:
         return
     await _db["partner_nonces"].insert_one({
         "address": address.lower(),
@@ -183,7 +183,7 @@ async def save_nonce(address: str, nonce: str):
 
 
 async def get_and_delete_nonce(address: str) -> Optional[str]:
-    if not _db:
+    if _db is None:
         return None
     doc = await _db["partner_nonces"].find_one_and_delete(
         {"address": address.lower()},
@@ -197,7 +197,7 @@ async def create_partner(
     description: str, api_key_hash: str, api_secret_hash: str,
     api_key_prefix: str,
 ) -> dict:
-    if not _db:
+    if _db is None:
         return {}
     now = datetime.now(timezone.utc)
     doc = {
@@ -222,13 +222,13 @@ async def create_partner(
 
 
 async def get_partner_by_address(address: str) -> Optional[dict]:
-    if not _db:
+    if _db is None:
         return None
     return await _db["partners"].find_one({"address": address.lower()})
 
 
 async def get_partner_by_api_key(api_key_hash: str) -> Optional[dict]:
-    if not _db:
+    if _db is None:
         return None
     return await _db["partners"].find_one({
         "api_key_hash": api_key_hash,
@@ -237,7 +237,7 @@ async def get_partner_by_api_key(api_key_hash: str) -> Optional[dict]:
 
 
 async def update_partner(address: str, fields: dict):
-    if not _db:
+    if _db is None:
         return
     fields["updated_at"] = datetime.now(timezone.utc)
     await _db["partners"].update_one(
@@ -247,7 +247,7 @@ async def update_partner(address: str, fields: dict):
 
 
 async def rotate_partner_keys(address: str, api_key_hash: str, api_secret_hash: str, api_key_prefix: str):
-    if not _db:
+    if _db is None:
         return
     await update_partner(address, {
         "api_key_hash": api_key_hash,
@@ -257,7 +257,7 @@ async def rotate_partner_keys(address: str, api_key_hash: str, api_secret_hash: 
 
 
 async def save_session(token_hash: str, address: str, expires_at: datetime) -> None:
-    if not _db:
+    if _db is None:
         return
     await _db["partner_sessions"].insert_one({
         "token_hash": token_hash,
@@ -268,7 +268,7 @@ async def save_session(token_hash: str, address: str, expires_at: datetime) -> N
 
 
 async def get_session(token_hash: str) -> Optional[dict]:
-    if not _db:
+    if _db is None:
         return None
     now = datetime.now(timezone.utc)
     return await _db["partner_sessions"].find_one({
@@ -278,7 +278,7 @@ async def get_session(token_hash: str) -> Optional[dict]:
 
 
 async def delete_sessions(address: str):
-    if not _db:
+    if _db is None:
         return
     await _db["partner_sessions"].delete_many({"address": address.lower()})
 
@@ -288,7 +288,7 @@ async def save_partner_transaction(
     from_chain_id: int, from_amount: str, quote_type: str,
     fee_amount: str = "0",
 ):
-    if not _db:
+    if _db is None:
         return
     now = datetime.now(timezone.utc)
     await _db["partner_transactions"].insert_one({
@@ -318,7 +318,7 @@ async def save_partner_transaction(
 
 
 async def get_partner_dashboard(address: str) -> dict:
-    if not _db:
+    if _db is None:
         return {}
     addr = address.lower()
     coll = _db["partner_transactions"]
@@ -361,7 +361,7 @@ async def get_partner_dashboard(address: str) -> dict:
 
 
 async def get_partner_transactions(address: str, limit: int = 50, skip: int = 0) -> list[dict]:
-    if not _db:
+    if _db is None:
         return []
     cursor = _db["partner_transactions"].find(
         {"partner_address": address.lower()},
@@ -373,7 +373,7 @@ async def get_partner_transactions(address: str, limit: int = 50, skip: int = 0)
 # ========== KOL ==========
 
 async def save_kol_nonce(address: str, nonce: str):
-    if not _db:
+    if _db is None:
         return
     await _db["kol_nonces"].insert_one({
         "address": address.lower(),
@@ -383,7 +383,7 @@ async def save_kol_nonce(address: str, nonce: str):
 
 
 async def get_and_delete_kol_nonce(address: str) -> Optional[str]:
-    if not _db:
+    if _db is None:
         return None
     doc = await _db["kol_nonces"].find_one_and_delete(
         {"address": address.lower()},
@@ -395,7 +395,7 @@ async def get_and_delete_kol_nonce(address: str) -> Optional[str]:
 async def create_kol(
     address: str, handle: str, name: str, bio: str, twitter: str,
 ) -> dict:
-    if not _db:
+    if _db is None:
         return {}
     now = datetime.now(timezone.utc)
     doc = {
@@ -415,19 +415,19 @@ async def create_kol(
 
 
 async def get_kol_by_address(address: str) -> Optional[dict]:
-    if not _db:
+    if _db is None:
         return None
     return await _db["kols"].find_one({"address": address.lower()})
 
 
 async def get_kol_by_handle(handle: str) -> Optional[dict]:
-    if not _db:
+    if _db is None:
         return None
     return await _db["kols"].find_one({"handle": handle.lower()})
 
 
 async def update_kol(address: str, fields: dict):
-    if not _db:
+    if _db is None:
         return
     fields["updated_at"] = datetime.now(timezone.utc)
     await _db["kols"].update_one(
@@ -437,7 +437,7 @@ async def update_kol(address: str, fields: dict):
 
 
 async def save_kol_session(token_hash: str, address: str, expires_at: datetime) -> None:
-    if not _db:
+    if _db is None:
         return
     await _db["kol_sessions"].insert_one({
         "token_hash": token_hash,
@@ -448,7 +448,7 @@ async def save_kol_session(token_hash: str, address: str, expires_at: datetime) 
 
 
 async def get_kol_session(token_hash: str) -> Optional[dict]:
-    if not _db:
+    if _db is None:
         return None
     now = datetime.now(timezone.utc)
     return await _db["kol_sessions"].find_one({
@@ -458,13 +458,13 @@ async def get_kol_session(token_hash: str) -> Optional[dict]:
 
 
 async def delete_kol_sessions(address: str):
-    if not _db:
+    if _db is None:
         return
     await _db["kol_sessions"].delete_many({"address": address.lower()})
 
 
 async def get_kol_dashboard(address: str) -> dict:
-    if not _db:
+    if _db is None:
         return {}
     addr = address.lower()
     coll = _db["kol_referrals"]
@@ -502,7 +502,7 @@ async def get_kol_dashboard(address: str) -> dict:
 
 
 async def get_kol_referrals(address: str, limit: int = 50, skip: int = 0) -> list[dict]:
-    if not _db:
+    if _db is None:
         return []
     cursor = _db["kol_referrals"].find(
         {"kol_address": address.lower()},

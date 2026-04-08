@@ -42,6 +42,20 @@
               "guides/deposit-router-contracts",
               "guides/error-handling"
             ]
+          },
+          {
+            "group": "Scoring Framework",
+            "icon": "calculator-simple",
+            "pages": [
+              "Scoring/overview",
+              "Scoring/four-dimensions",
+              "Scoring/flags",
+              "Scoring/confidence-multiplier",
+              "Scoring/design-principles",
+              "Scoring/scoring-model",
+              "Scoring/data-architecture",
+              "Scoring/roadmap"
+            ]
           }
         ]
       },

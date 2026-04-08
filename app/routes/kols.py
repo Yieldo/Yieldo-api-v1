@@ -59,6 +59,13 @@ async def get_public_profile(handle: str):
 
 @router.post("/nonce", response_model=KolNonceResponse)
 async def get_nonce(req: KolNonceRequest):
+    # Mutual exclusion: wallet partners cannot register as KOLs
+    existing_partner = await database.get_partner_by_address(req.address)
+    if existing_partner:
+        raise HTTPException(
+            status_code=409,
+            detail="This address is already registered as a wallet partner. A wallet cannot also be a KOL.",
+        )
     nonce = generate_nonce()
     await database.save_kol_nonce(req.address, nonce)
     existing = await database.get_kol_by_address(req.address)

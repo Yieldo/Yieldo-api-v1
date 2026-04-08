@@ -19,7 +19,27 @@
         "tab": "Documentation",
         "groups": [
           {
-            "group": "Get Started",
+            "group": "Introduction",
+            "pages": [
+              "introduction"
+            ]
+          },
+          {
+            "group": "Scoring Framework",
+            "icon": "calculator-simple",
+            "pages": [
+              "Scoring/overview",
+              "Scoring/four-dimensions",
+              "Scoring/flags",
+              "Scoring/confidence-multiplier",
+              "Scoring/design-principles",
+              "Scoring/scoring-model",
+              "Scoring/data-architecture",
+              "Scoring/roadmap"
+            ]
+          },
+          {
+            "group": "Technical Documentation",
             "pages": [
               "index",
               "getting-started"
@@ -41,20 +61,6 @@
               "guides/cross-chain-deposits",
               "guides/deposit-router-contracts",
               "guides/error-handling"
-            ]
-          },
-          {
-            "group": "Scoring Framework",
-            "icon": "calculator-simple",
-            "pages": [
-              "Scoring/overview",
-              "Scoring/four-dimensions",
-              "Scoring/flags",
-              "Scoring/confidence-multiplier",
-              "Scoring/design-principles",
-              "Scoring/scoring-model",
-              "Scoring/data-architecture",
-              "Scoring/roadmap"
             ]
           }
         ]

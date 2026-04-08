@@ -276,3 +276,82 @@ class PartnerAPIKeyRotateResponse(BaseModel):
     api_key: str
     api_secret: str
     api_key_prefix: str
+
+
+# ========== KOL Models ==========
+
+class KolNonceRequest(BaseModel):
+    address: str
+
+
+class KolNonceResponse(BaseModel):
+    nonce: str
+    message: str
+
+
+class KolRegisterRequest(BaseModel):
+    address: str
+    signature: str
+    handle: str
+    name: str
+    bio: str = ""
+    twitter: str = ""
+
+
+class KolRegisterResponse(BaseModel):
+    address: str
+    handle: str
+    name: str
+    created_at: str
+
+
+class KolLoginRequest(BaseModel):
+    address: str
+    signature: str
+
+
+class KolLoginResponse(BaseModel):
+    session_token: str
+    expires_at: str
+    kol: dict
+
+
+class KolProfile(BaseModel):
+    address: str
+    handle: str
+    name: str
+    bio: str = ""
+    twitter: str = ""
+    fee_collector_address: str = ""
+    enrolled_vaults: list[str] = []
+    created_at: str = ""
+    status: str = "active"
+
+
+class KolPublicProfile(BaseModel):
+    handle: str
+    name: str
+    bio: str = ""
+    twitter: str = ""
+    enrolled_vaults: list[str] = []
+    created_at: str = ""
+
+
+class KolSettingsUpdate(BaseModel):
+    name: Optional[str] = None
+    bio: Optional[str] = None
+    twitter: Optional[str] = None
+    fee_collector_address: Optional[str] = None
+
+
+class KolVaultsUpdate(BaseModel):
+    enrolled_vaults: list[str]
+
+
+class KolDashboardResponse(BaseModel):
+    total_referrals: int = 0
+    total_volume: str = "0"
+    total_earnings: str = "0"
+    total_users: int = 0
+    referrals_7d: int = 0
+    users_7d: int = 0

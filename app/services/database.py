@@ -69,6 +69,27 @@ async def _ensure_indexes():
 
         pusers = _db["partner_users"]
         await pusers.create_index([("partner_address", 1), ("user_address", 1)], unique=True)
+
+        # KOL indexes
+        kols = _db["kols"]
+        await kols.create_index("address", unique=True)
+        await kols.create_index("handle", unique=True)
+
+        kol_nonces = _db["kol_nonces"]
+        await kol_nonces.create_index("address")
+        await kol_nonces.create_index("created_at", expireAfterSeconds=300)
+
+        kol_sessions = _db["kol_sessions"]
+        await kol_sessions.create_index("token_hash")
+        await kol_sessions.create_index("expires_at", expireAfterSeconds=0)
+
+        kol_referrals = _db["kol_referrals"]
+        await kol_referrals.create_index("kol_address")
+        await kol_referrals.create_index("user_address")
+        await kol_referrals.create_index("created_at")
+
+        kol_users = _db["kol_users"]
+        await kol_users.create_index([("kol_address", 1), ("user_address", 1)], unique=True)
     except Exception as e:
         logger.error(f"MongoDB index creation failed: {e}")
 
@@ -344,6 +365,147 @@ async def get_partner_transactions(address: str, limit: int = 50, skip: int = 0)
         return []
     cursor = _db["partner_transactions"].find(
         {"partner_address": address.lower()},
+        {"_id": 0},
+    ).sort("created_at", -1).skip(skip).limit(limit)
+    return await cursor.to_list(limit)
+
+
+# ========== KOL ==========
+
+async def save_kol_nonce(address: str, nonce: str):
+    if not _db:
+        return
+    await _db["kol_nonces"].insert_one({
+        "address": address.lower(),
+        "nonce": nonce,
+        "created_at": datetime.now(timezone.utc),
+    })
+
+
+async def get_and_delete_kol_nonce(address: str) -> Optional[str]:
+    if not _db:
+        return None
+    doc = await _db["kol_nonces"].find_one_and_delete(
+        {"address": address.lower()},
+        sort=[("created_at", -1)],
+    )
+    return doc["nonce"] if doc else None
+
+
+async def create_kol(
+    address: str, handle: str, name: str, bio: str, twitter: str,
+) -> dict:
+    if not _db:
+        return {}
+    now = datetime.now(timezone.utc)
+    doc = {
+        "address": address.lower(),
+        "handle": handle.lower(),
+        "name": name,
+        "bio": bio,
+        "twitter": twitter,
+        "fee_collector_address": address.lower(),
+        "enrolled_vaults": [],
+        "status": "active",
+        "created_at": now,
+        "updated_at": now,
+    }
+    await _db["kols"].insert_one(doc)
+    return doc
+
+
+async def get_kol_by_address(address: str) -> Optional[dict]:
+    if not _db:
+        return None
+    return await _db["kols"].find_one({"address": address.lower()})
+
+
+async def get_kol_by_handle(handle: str) -> Optional[dict]:
+    if not _db:
+        return None
+    return await _db["kols"].find_one({"handle": handle.lower()})
+
+
+async def update_kol(address: str, fields: dict):
+    if not _db:
+        return
+    fields["updated_at"] = datetime.now(timezone.utc)
+    await _db["kols"].update_one(
+        {"address": address.lower()},
+        {"$set": fields},
+    )
+
+
+async def save_kol_session(token_hash: str, address: str, expires_at: datetime) -> None:
+    if not _db:
+        return
+    await _db["kol_sessions"].insert_one({
+        "token_hash": token_hash,
+        "address": address.lower(),
+        "created_at": datetime.now(timezone.utc),
+        "expires_at": expires_at,
+    })
+
+
+async def get_kol_session(token_hash: str) -> Optional[dict]:
+    if not _db:
+        return None
+    now = datetime.now(timezone.utc)
+    return await _db["kol_sessions"].find_one({
+        "token_hash": token_hash,
+        "expires_at": {"$gt": now},
+    })
+
+
+async def delete_kol_sessions(address: str):
+    if not _db:
+        return
+    await _db["kol_sessions"].delete_many({"address": address.lower()})
+
+
+async def get_kol_dashboard(address: str) -> dict:
+    if not _db:
+        return {}
+    addr = address.lower()
+    coll = _db["kol_referrals"]
+    users_coll = _db["kol_users"]
+
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    week_ago = now - timedelta(days=7)
+
+    total = await coll.count_documents({"kol_address": addr})
+    total_users = await users_coll.count_documents({"kol_address": addr})
+    referrals_7d = await coll.count_documents({"kol_address": addr, "created_at": {"$gte": week_ago}})
+    users_7d = await users_coll.count_documents({"kol_address": addr, "last_seen": {"$gte": week_ago}})
+
+    pipeline = [
+        {"$match": {"kol_address": addr}},
+        {"$group": {
+            "_id": None,
+            "total_volume": {"$sum": {"$toLong": "$from_amount"}},
+            "total_earnings": {"$sum": {"$toLong": "$fee_amount"}},
+        }},
+    ]
+    agg = await coll.aggregate(pipeline).to_list(1)
+    vol = str(agg[0]["total_volume"]) if agg else "0"
+    earnings = str(agg[0]["total_earnings"]) if agg else "0"
+
+    return {
+        "total_referrals": total,
+        "total_volume": vol,
+        "total_earnings": earnings,
+        "total_users": total_users,
+        "referrals_7d": referrals_7d,
+        "users_7d": users_7d,
+    }
+
+
+async def get_kol_referrals(address: str, limit: int = 50, skip: int = 0) -> list[dict]:
+    if not _db:
+        return []
+    cursor = _db["kol_referrals"].find(
+        {"kol_address": address.lower()},
         {"_id": 0},
     ).sort("created_at", -1).skip(skip).limit(limit)
     return await cursor.to_list(limit)

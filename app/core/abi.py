@@ -56,6 +56,55 @@ DEPOSIT_ROUTER_ABI = [
         "type": "function",
     },
     {
+        "inputs": [
+            {
+                "components": [
+                    {"internalType": "address", "name": "user", "type": "address"},
+                    {"internalType": "address", "name": "vault", "type": "address"},
+                    {"internalType": "address", "name": "asset", "type": "address"},
+                    {"internalType": "uint256", "name": "amount", "type": "uint256"},
+                    {"internalType": "uint256", "name": "nonce", "type": "uint256"},
+                    {"internalType": "uint256", "name": "deadline", "type": "uint256"},
+                    {"internalType": "uint256", "name": "feeBps", "type": "uint256"},
+                ],
+                "internalType": "struct DepositRouter.DepositIntent",
+                "name": "intent",
+                "type": "tuple",
+            },
+            {"internalType": "bytes", "name": "signature", "type": "bytes"},
+            {"internalType": "address", "name": "referrer", "type": "address"},
+        ],
+        "name": "depositWithIntent",
+        "outputs": [{"internalType": "bytes32", "name": "intentHash", "type": "bytes32"}],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [
+            {
+                "components": [
+                    {"internalType": "address", "name": "user", "type": "address"},
+                    {"internalType": "address", "name": "vault", "type": "address"},
+                    {"internalType": "address", "name": "asset", "type": "address"},
+                    {"internalType": "uint256", "name": "amount", "type": "uint256"},
+                    {"internalType": "uint256", "name": "nonce", "type": "uint256"},
+                    {"internalType": "uint256", "name": "deadline", "type": "uint256"},
+                    {"internalType": "uint256", "name": "feeBps", "type": "uint256"},
+                ],
+                "internalType": "struct DepositRouter.DepositIntent",
+                "name": "intent",
+                "type": "tuple",
+            },
+            {"internalType": "bytes", "name": "signature", "type": "bytes"},
+            {"internalType": "address", "name": "referrer", "type": "address"},
+            {"internalType": "bytes[]", "name": "priceUpdate", "type": "bytes[]"},
+        ],
+        "name": "depositWithIntentCrossChain",
+        "outputs": [{"internalType": "bytes32", "name": "intentHash", "type": "bytes32"}],
+        "stateMutability": "payable",
+        "type": "function",
+    },
+    {
         "inputs": [{"internalType": "bytes32", "name": "intentHash", "type": "bytes32"}],
         "name": "getDeposit",
         "outputs": [

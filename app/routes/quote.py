@@ -252,8 +252,11 @@ async def build_transaction(req: BuildRequest, request: Request):
     fee_bps = int(req.fee_bps)
     sig_bytes = bytes.fromhex(req.signature.replace("0x", ""))
 
+    vault_type = vault.get("type", "morpho")
+    is_erc4626 = vault_type == "morpho"
+
     if is_direct:
-        fn_name = "depositWithIntentERC4626"
+        fn_name = "depositWithIntentERC4626" if is_erc4626 else "depositWithIntent"
         calldata = encode_deposit_calldata(
             to_chain, fn_name, req.user_address, vault["address"],
             to_token, intent_amount, nonce, deadline, fee_bps,
@@ -299,7 +302,7 @@ async def build_transaction(req: BuildRequest, request: Request):
     price_update = get_price_update(to_token)
     pyth_fee = get_pyth_update_fee(to_chain, price_update)
 
-    fn_name = "depositWithIntentCrossChainERC4626"
+    fn_name = "depositWithIntentCrossChainERC4626" if is_erc4626 else "depositWithIntentCrossChain"
     calldata = encode_deposit_calldata(
         to_chain, fn_name, req.user_address, vault["address"],
         to_token, intent_amount, nonce, deadline, fee_bps,

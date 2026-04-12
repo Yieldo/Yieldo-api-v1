@@ -42,6 +42,7 @@ def load_vaults():
             "asset_address": asset_addr,
             "asset_decimals": asset_decimals,
             "deposit_router": DEPOSIT_ROUTER_ADDRESSES[chain_id],
+            "type": v.get("type", "morpho"),
         }
 
 

@@ -74,4 +74,5 @@ def _to_response(v: dict) -> VaultResponse:
             decimals=v["asset_decimals"],
         ),
         deposit_router=v["deposit_router"],
+        type=v.get("type", "morpho"),
     )

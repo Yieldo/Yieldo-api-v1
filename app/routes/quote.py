@@ -75,6 +75,9 @@ async def get_quote(req: QuoteRequest, request: Request):
     if not vault:
         raise HTTPException(status_code=404, detail=f"Vault {req.vault_id} not found")
 
+    if vault.get("type") == "unsupported":
+        raise HTTPException(status_code=400, detail=f"Vault {vault['name']} does not support deposits through our router. Please deposit directly on the protocol's website.")
+
     to_chain = vault["chain_id"]
     to_token = vault["asset_address"]
     deposit_router = vault["deposit_router"]
@@ -237,6 +240,9 @@ async def build_transaction(req: BuildRequest, request: Request):
     vault = get_vault(req.vault_id)
     if not vault:
         raise HTTPException(status_code=404, detail=f"Vault {req.vault_id} not found")
+
+    if vault.get("type") == "unsupported":
+        raise HTTPException(status_code=400, detail=f"Vault {vault['name']} does not support deposits through our router.")
 
     to_chain = vault["chain_id"]
     to_token = vault["asset_address"]

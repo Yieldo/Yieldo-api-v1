@@ -55,6 +55,19 @@ async def get_public_profile(handle: str):
     )
 
 
+@router.get("/resolve/{handle}")
+async def resolve_handle(handle: str):
+    """Resolve a KOL handle to their referrer address (fee_collector_address)."""
+    kol = await database.get_kol_by_handle(handle)
+    if not kol:
+        raise HTTPException(status_code=404, detail="KOL not found")
+    return {
+        "handle": kol["handle"],
+        "name": kol["name"],
+        "address": kol.get("fee_collector_address", kol["address"]),
+    }
+
+
 # ========== Auth Endpoints ==========
 
 @router.post("/nonce", response_model=KolNonceResponse)

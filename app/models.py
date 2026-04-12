@@ -120,6 +120,7 @@ class BuildRequest(BaseModel):
     fee_bps: str = "10"
     slippage: float = 0.03
     referrer: str = "0x0000000000000000000000000000000000000000"
+    referrer_handle: str = ""
 
 
 class TransactionRequest(BaseModel):

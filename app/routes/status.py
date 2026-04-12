@@ -59,7 +59,10 @@ async def get_transfer_status(
     lifi_explorer = f"https://explorer.li.fi/tx/{tx_hash}" if tx_hash else None
 
     db_status = _LIFI_STATUS_MAP.get(status, "submitted")
-    await database.update_transaction_status(tx_hash, from_chain_id, db_status)
+    extra = {"lifi_explorer": lifi_explorer}
+    if bridge:
+        extra["bridge"] = bridge
+    await database.update_transaction_status(tx_hash, from_chain_id, db_status, extra_fields=extra)
 
     return StatusResponse(
         status=status,

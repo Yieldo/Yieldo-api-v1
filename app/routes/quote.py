@@ -279,7 +279,13 @@ async def build_transaction(req: BuildRequest, request: Request):
             ),
             tracking=TrackingInfo(from_chain_id=to_chain, to_chain_id=to_chain),
         )
-        tracking_id = await database.save_transaction(req.model_dump(), response.model_dump())
+        tracking_id = await database.save_transaction(
+            req.model_dump(), response.model_dump(),
+            vault_name=vault["name"],
+            referrer=req.referrer,
+            referrer_handle=req.referrer_handle,
+            quote_type="direct",
+        )
         response.tracking_id = tracking_id
         return response
 
@@ -348,7 +354,14 @@ async def build_transaction(req: BuildRequest, request: Request):
             lifi_explorer=f"https://explorer.li.fi",
         ),
     )
-    tracking_id = await database.save_transaction(req.model_dump(), response.model_dump())
+    quote_type = "cross_chain" if req.from_chain_id != to_chain else "same_chain_swap"
+    tracking_id = await database.save_transaction(
+        req.model_dump(), response.model_dump(),
+        vault_name=vault["name"],
+        referrer=req.referrer,
+        referrer_handle=req.referrer_handle,
+        quote_type=quote_type,
+    )
     response.tracking_id = tracking_id
     return response
 

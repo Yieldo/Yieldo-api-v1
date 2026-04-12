@@ -113,20 +113,36 @@ async def save_quote(request_dict: dict, response_dict: dict) -> Optional[str]:
         return None
 
 
-async def save_transaction(request_dict: dict, response_dict: dict) -> Optional[str]:
+async def save_transaction(
+    request_dict: dict,
+    response_dict: dict,
+    vault_name: str = "",
+    referrer: str = "",
+    referrer_handle: str = "",
+    quote_type: str = "",
+) -> Optional[str]:
     if _db is None:
         return None
     try:
         now = datetime.now(timezone.utc)
+        tracking = response_dict.get("tracking", {})
         doc = {
             "request": request_dict,
             "response": response_dict,
             "user_address": request_dict.get("user_address"),
             "vault_id": request_dict.get("vault_id"),
+            "vault_name": vault_name,
             "from_chain_id": request_dict.get("from_chain_id"),
-            "to_chain_id": response_dict.get("tracking", {}).get("to_chain_id"),
+            "to_chain_id": tracking.get("to_chain_id"),
+            "from_token": request_dict.get("from_token"),
+            "from_amount": request_dict.get("from_amount"),
+            "referrer": referrer or request_dict.get("referrer", ""),
+            "referrer_handle": referrer_handle,
+            "quote_type": quote_type,
             "status": "pending",
             "tx_hash": None,
+            "lifi_explorer": tracking.get("lifi_explorer"),
+            "bridge": tracking.get("bridge"),
             "status_history": [{"status": "pending", "timestamp": now}],
             "created_at": now,
             "updated_at": now,
@@ -168,6 +184,37 @@ async def update_transaction_status(
         )
     except Exception as e:
         logger.error(f"Failed to update transaction status: {e}")
+
+
+async def get_user_deposits(address: str, limit: int = 50, skip: int = 0) -> list[dict]:
+    if _db is None:
+        return []
+    cursor = _db["transactions"].find(
+        {"user_address": address.lower()},
+        {
+            "_id": 0,
+            "request": 0,
+            "response": 0,
+        },
+    ).sort("created_at", -1).skip(skip).limit(limit)
+    return await cursor.to_list(limit)
+
+
+async def get_user_deposit_summary(address: str) -> dict:
+    if _db is None:
+        return {}
+    addr = address.lower()
+    coll = _db["transactions"]
+    total = await coll.count_documents({"user_address": addr})
+    completed = await coll.count_documents({"user_address": addr, "status": "completed"})
+    failed = await coll.count_documents({"user_address": addr, "status": "failed"})
+    pending = await coll.count_documents({"user_address": addr, "status": {"$in": ["pending", "submitted"]}})
+    return {
+        "total_deposits": total,
+        "completed": completed,
+        "failed": failed,
+        "pending": pending,
+    }
 
 
 # ========== Partner / Wallet Provider ==========

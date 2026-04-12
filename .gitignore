@@ -7,3 +7,4 @@ venv/
 
 test-ui/node_modules/
 test-ui/dist/
+.claude

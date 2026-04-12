@@ -90,6 +90,18 @@ async def _ensure_indexes():
 
         kol_users = _db["kol_users"]
         await kol_users.create_index([("kol_address", 1), ("user_address", 1)], unique=True)
+        # User indexes
+        users = _db["users"]
+        await users.create_index("address", unique=True)
+
+        user_nonces = _db["user_nonces"]
+        await user_nonces.create_index("address")
+        await user_nonces.create_index("created_at", expireAfterSeconds=300)
+
+        user_sessions = _db["user_sessions"]
+        await user_sessions.create_index("token_hash")
+        await user_sessions.create_index("expires_at", expireAfterSeconds=0)
+
     except Exception as e:
         logger.error(f"MongoDB index creation failed: {e}")
 
@@ -556,3 +568,91 @@ async def get_kol_referrals(address: str, limit: int = 50, skip: int = 0) -> lis
         {"_id": 0},
     ).sort("created_at", -1).skip(skip).limit(limit)
     return await cursor.to_list(limit)
+
+
+# ========== Users ==========
+
+async def save_user_nonce(address: str, nonce: str):
+    if _db is None:
+        return
+    await _db["user_nonces"].insert_one({
+        "address": address.lower(),
+        "nonce": nonce,
+        "created_at": datetime.now(timezone.utc),
+    })
+
+
+async def get_and_delete_user_nonce(address: str) -> Optional[str]:
+    if _db is None:
+        return None
+    doc = await _db["user_nonces"].find_one_and_delete(
+        {"address": address.lower()},
+        sort=[("created_at", -1)],
+    )
+    return doc["nonce"] if doc else None
+
+
+async def get_or_create_user(address: str) -> dict:
+    """Auto-register user on first login, or return existing."""
+    if _db is None:
+        return {}
+    addr = address.lower()
+    now = datetime.now(timezone.utc)
+    existing = await _db["users"].find_one({"address": addr})
+    if existing:
+        await _db["users"].update_one(
+            {"address": addr},
+            {"$set": {"last_login": now}},
+        )
+        existing["last_login"] = now
+        return existing
+    doc = {
+        "address": addr,
+        "status": "active",
+        "created_at": now,
+        "last_login": now,
+    }
+    await _db["users"].insert_one(doc)
+    return doc
+
+
+async def get_user_by_address(address: str) -> Optional[dict]:
+    if _db is None:
+        return None
+    return await _db["users"].find_one({"address": address.lower()})
+
+
+async def save_user_session(token_hash: str, address: str, expires_at: datetime) -> None:
+    if _db is None:
+        return
+    await _db["user_sessions"].insert_one({
+        "token_hash": token_hash,
+        "address": address.lower(),
+        "created_at": datetime.now(timezone.utc),
+        "expires_at": expires_at,
+    })
+
+
+async def get_user_session(token_hash: str) -> Optional[dict]:
+    if _db is None:
+        return None
+    now = datetime.now(timezone.utc)
+    return await _db["user_sessions"].find_one({
+        "token_hash": token_hash,
+        "expires_at": {"$gt": now},
+    })
+
+
+async def delete_user_sessions(address: str):
+    if _db is None:
+        return
+    await _db["user_sessions"].delete_many({"address": address.lower()})
+
+
+async def delete_all_users():
+    """Drop all user data — users, sessions, nonces."""
+    if _db is None:
+        return
+    await _db["users"].delete_many({})
+    await _db["user_sessions"].delete_many({})
+    await _db["user_nonces"].delete_many({})

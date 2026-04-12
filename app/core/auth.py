@@ -73,3 +73,11 @@ def build_kol_login_message(address: str, nonce: str) -> str:
         f"Address: {address}\n"
         f"Nonce: {nonce}"
     )
+
+
+def build_user_login_message(address: str, nonce: str) -> str:
+    return (
+        f"Sign this message to login to Yieldo.\n\n"
+        f"Address: {address}\n"
+        f"Nonce: {nonce}"
+    )

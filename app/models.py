@@ -356,3 +356,32 @@ class KolDashboardResponse(BaseModel):
     total_users: int = 0
     referrals_7d: int = 0
     users_7d: int = 0
+
+
+# ========== User Models ==========
+
+class UserNonceRequest(BaseModel):
+    address: str
+
+
+class UserNonceResponse(BaseModel):
+    nonce: str
+    message: str
+
+
+class UserLoginRequest(BaseModel):
+    address: str
+    signature: str
+
+
+class UserLoginResponse(BaseModel):
+    session_token: str
+    expires_at: str
+    user: dict
+
+
+class UserProfile(BaseModel):
+    address: str
+    created_at: str = ""
+    last_login: str = ""
+    status: str = "active"

@@ -138,12 +138,18 @@ class TrackingInfo(BaseModel):
     lifi_explorer: Optional[str] = None
 
 
+class DepositStep(BaseModel):
+    transaction_request: TransactionRequest
+    approval: Optional[ApprovalData] = None
+
 class BuildResponse(BaseModel):
     transaction_request: TransactionRequest
     approval: Optional[ApprovalData] = None
     intent: IntentData
     tracking: TrackingInfo
     tracking_id: Optional[str] = None
+    two_step: bool = False
+    deposit_tx: Optional[DepositStep] = None
 
 
 class SendingInfo(BaseModel):

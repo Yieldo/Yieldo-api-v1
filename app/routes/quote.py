@@ -13,6 +13,7 @@ from app.models import (
     BuildResponse,
     TransactionRequest,
     TrackingInfo,
+    DepositStep,
 )
 from app.core.constants import (
     FEE_BPS,
@@ -305,64 +306,122 @@ async def build_transaction(req: BuildRequest, request: Request):
     if not lifi_quote:
         raise HTTPException(status_code=400, detail="No route found")
 
-    price_update = get_price_update(to_token)
-    pyth_fee = get_pyth_update_fee(to_chain, price_update)
-
-    fn_name = "depositWithIntentCrossChainERC4626" if is_erc4626 else "depositWithIntentCrossChain"
-    calldata = encode_deposit_calldata(
-        to_chain, fn_name, req.user_address, vault["address"],
-        to_token, intent_amount, nonce, deadline, fee_bps,
-        sig_bytes, req.referrer, price_update,
-    )
-
-    contract_call_amount = str(intent_amount)
-
     bridge = lifi.extract_bridge_from_quote(lifi_quote)
-    preferred = [bridge] if bridge else None
+    use_two_step = not is_erc4626  # Midas/Veda/Custom need two-step for cross-chain
 
-    cc_quote = await lifi.get_contract_calls_quote(
-        req.from_chain_id, req.from_token, req.from_amount,
-        to_chain, to_token, req.user_address,
-        deposit_router, calldata, contract_call_amount,
-        preferred_bridges=preferred,
-        slippage=req.slippage,
-    )
+    if use_two_step:
+        # Two-step: Step 1 = bridge to user wallet, Step 2 = same-chain deposit
+        tx_req = lifi_quote.get("transactionRequest", {})
+        if not tx_req:
+            raise HTTPException(status_code=400, detail="No bridge route found")
+        approval_target = tx_req.get("to", "")
 
-    if not cc_quote:
-        raise HTTPException(
-            status_code=400,
-            detail="LiFi contract calls quote unavailable for this route. Use fallback flow.",
+        # Build step-2 deposit calldata (same-chain direct deposit on dest chain)
+        dep_fn = "depositWithIntentERC4626" if is_erc4626 else "depositWithIntent"
+        dep_calldata = encode_deposit_calldata(
+            to_chain, dep_fn, req.user_address, vault["address"],
+            to_token, intent_amount, nonce, deadline, fee_bps,
+            sig_bytes, req.referrer,
         )
 
-    tx_req = cc_quote["transactionRequest"]
-    approval_target = tx_req.get("to", deposit_router)
-    used_bridge = lifi.extract_bridge_from_quote(cc_quote)
+        response = BuildResponse(
+            transaction_request=TransactionRequest(
+                to=tx_req["to"],
+                data=tx_req["data"],
+                value=str(tx_req.get("value", "0")),
+                chain_id=req.from_chain_id,
+                gas_limit=tx_req.get("gasLimit"),
+            ),
+            approval=None if _is_native_token(req.from_token) else ApprovalData(
+                token_address=req.from_token,
+                spender_address=approval_target,
+                amount=req.from_amount,
+            ),
+            intent=IntentData(
+                user=req.user_address, vault=vault["address"], asset=to_token,
+                amount=str(intent_amount), nonce=str(nonce), deadline=str(deadline),
+                fee_bps=str(fee_bps),
+            ),
+            tracking=TrackingInfo(
+                from_chain_id=req.from_chain_id,
+                to_chain_id=to_chain,
+                bridge=bridge,
+                lifi_explorer="https://explorer.li.fi",
+            ),
+            two_step=True,
+            deposit_tx=DepositStep(
+                transaction_request=TransactionRequest(
+                    to=deposit_router,
+                    data=dep_calldata,
+                    value="0",
+                    chain_id=to_chain,
+                    gas_limit="500000",
+                ),
+                approval=ApprovalData(
+                    token_address=to_token,
+                    spender_address=deposit_router,
+                    amount=str(intent_amount),
+                ),
+            ),
+        )
+    else:
+        # Single-step: LiFi contract calls (bridge + deposit in one tx)
+        price_update = get_price_update(to_token)
+        pyth_fee = get_pyth_update_fee(to_chain, price_update)
 
-    response = BuildResponse(
-        transaction_request=TransactionRequest(
-            to=tx_req["to"],
-            data=tx_req["data"],
-            value=str(tx_req.get("value", "0")),
-            chain_id=req.from_chain_id,
-            gas_limit=tx_req.get("gasLimit"),
-        ),
-        approval=None if _is_native_token(req.from_token) else ApprovalData(
-            token_address=req.from_token,
-            spender_address=approval_target,
-            amount=req.from_amount,
-        ),
-        intent=IntentData(
-            user=req.user_address, vault=vault["address"], asset=to_token,
-            amount=str(intent_amount), nonce=str(nonce), deadline=str(deadline),
-            fee_bps=str(fee_bps),
-        ),
-        tracking=TrackingInfo(
-            from_chain_id=req.from_chain_id,
-            to_chain_id=to_chain,
-            bridge=used_bridge,
-            lifi_explorer=f"https://explorer.li.fi",
-        ),
-    )
+        fn_name = "depositWithIntentCrossChainERC4626"
+        calldata = encode_deposit_calldata(
+            to_chain, fn_name, req.user_address, vault["address"],
+            to_token, intent_amount, nonce, deadline, fee_bps,
+            sig_bytes, req.referrer, price_update,
+        )
+
+        contract_call_amount = str(intent_amount)
+        preferred = [bridge] if bridge else None
+
+        cc_quote = await lifi.get_contract_calls_quote(
+            req.from_chain_id, req.from_token, req.from_amount,
+            to_chain, to_token, req.user_address,
+            deposit_router, calldata, contract_call_amount,
+            preferred_bridges=preferred,
+            slippage=req.slippage,
+        )
+
+        if not cc_quote:
+            raise HTTPException(
+                status_code=400,
+                detail="LiFi contract calls quote unavailable for this route. Use fallback flow.",
+            )
+
+        tx_req = cc_quote["transactionRequest"]
+        approval_target = tx_req.get("to", deposit_router)
+        used_bridge = lifi.extract_bridge_from_quote(cc_quote)
+
+        response = BuildResponse(
+            transaction_request=TransactionRequest(
+                to=tx_req["to"],
+                data=tx_req["data"],
+                value=str(tx_req.get("value", "0")),
+                chain_id=req.from_chain_id,
+                gas_limit=tx_req.get("gasLimit"),
+            ),
+            approval=None if _is_native_token(req.from_token) else ApprovalData(
+                token_address=req.from_token,
+                spender_address=approval_target,
+                amount=req.from_amount,
+            ),
+            intent=IntentData(
+                user=req.user_address, vault=vault["address"], asset=to_token,
+                amount=str(intent_amount), nonce=str(nonce), deadline=str(deadline),
+                fee_bps=str(fee_bps),
+            ),
+            tracking=TrackingInfo(
+                from_chain_id=req.from_chain_id,
+                to_chain_id=to_chain,
+                bridge=used_bridge,
+                lifi_explorer="https://explorer.li.fi",
+            ),
+        )
     quote_type = "cross_chain" if req.from_chain_id != to_chain else "same_chain_swap"
     tracking_id = await database.save_transaction(
         req.model_dump(), response.model_dump(),

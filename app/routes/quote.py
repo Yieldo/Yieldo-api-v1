@@ -18,6 +18,7 @@ from app.models import (
 from app.core.constants import (
     FEE_BPS,
     CROSS_CHAIN_SLIPPAGE_BUFFER,
+    NON_COMPOSER_CROSS_CHAIN_BUFFER,
     DEPOSIT_ROUTER_ADDRESSES,
     EIP712_DOMAIN_NAME,
     EIP712_DOMAIN_VERSION,
@@ -171,7 +172,12 @@ async def get_quote(req: QuoteRequest, request: Request):
     deposit_amount = to_amount_int - fee
 
     if not is_same_chain:
-        intent_amount = int(int(to_amount_min) * CROSS_CHAIN_SLIPPAGE_BUFFER)
+        # Non-composer vault types (Midas/Veda/Custom) get a wider buffer since
+        # their deposit path reverts the whole tx if the bridged amount lands below
+        # intent.amount — which would leave USDC stuck in the router.
+        vault_type_for_buffer = vault.get("type", "morpho")
+        buffer = NON_COMPOSER_CROSS_CHAIN_BUFFER if vault_type_for_buffer in ("midas", "veda", "custom") else CROSS_CHAIN_SLIPPAGE_BUFFER
+        intent_amount = int(int(to_amount_min) * buffer)
     else:
         intent_amount = to_amount_min_int
 
@@ -261,6 +267,8 @@ async def build_transaction(req: BuildRequest, request: Request):
 
     vault_type = vault.get("type", "morpho")
     is_erc4626 = vault_type == "morpho"
+    # Midas depositInstant + mTBILL transfer + fee accounting ~= 625-700k; others fit in 500k.
+    deposit_gas_limit = "900000" if vault_type in ("midas", "veda") else "500000"
 
     if is_direct:
         fn_name = "depositWithIntentERC4626" if is_erc4626 else "depositWithIntent"
@@ -275,7 +283,7 @@ async def build_transaction(req: BuildRequest, request: Request):
                 data=calldata,
                 value="0",
                 chain_id=to_chain,
-                gas_limit="500000",
+                gas_limit=deposit_gas_limit,
             ),
             approval=ApprovalData(
                 token_address=to_token,
@@ -307,7 +315,10 @@ async def build_transaction(req: BuildRequest, request: Request):
         raise HTTPException(status_code=400, detail="No route found")
 
     bridge = lifi.extract_bridge_from_quote(lifi_quote)
-    use_two_step = not is_erc4626  # Midas/Veda/Custom need two-step for cross-chain
+    # Single-step for all vault types — router's depositWithIntentCrossChain handles
+    # Midas/Veda/Custom via _executeVaultCall. Two-step remains available as a fallback
+    # below if LiFi's contract-calls quote fails.
+    use_two_step = False
 
     if use_two_step:
         # Two-step: Step 1 = bridge to user wallet, Step 2 = same-chain deposit
@@ -355,7 +366,7 @@ async def build_transaction(req: BuildRequest, request: Request):
                     data=dep_calldata,
                     value="0",
                     chain_id=to_chain,
-                    gas_limit="500000",
+                    gas_limit=deposit_gas_limit,
                 ),
                 approval=ApprovalData(
                     token_address=to_token,
@@ -369,7 +380,7 @@ async def build_transaction(req: BuildRequest, request: Request):
         price_update = get_price_update(to_token)
         pyth_fee = get_pyth_update_fee(to_chain, price_update)
 
-        fn_name = "depositWithIntentCrossChainERC4626"
+        fn_name = "depositWithIntentCrossChainERC4626" if is_erc4626 else "depositWithIntentCrossChain"
         calldata = encode_deposit_calldata(
             to_chain, fn_name, req.user_address, vault["address"],
             to_token, intent_amount, nonce, deadline, fee_bps,

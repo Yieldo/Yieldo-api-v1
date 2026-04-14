@@ -2,6 +2,11 @@ LIFI_BASE_URL = "https://li.quest/v1"
 LIFI_INTEGRATOR = "Yieldo"
 FEE_BPS = 10
 CROSS_CHAIN_SLIPPAGE_BUFFER = 0.99
+# Wider buffer for vault types without composer-native support (Midas, Veda, Custom).
+# Rationale: their deposit path is less tolerant of bridge-amount variance, and a revert
+# leaves USDC stuck in the router awaiting manual rescue. Widening the margin trades a
+# few bps of excess-stuck dust for near-zero revert risk.
+NON_COMPOSER_CROSS_CHAIN_BUFFER = 0.97
 
 DEPOSIT_ROUTER_ADDRESSES: dict[int, str] = {
     1: "0x85f76c1685046Ea226E1148EE1ab81a8a15C385d",

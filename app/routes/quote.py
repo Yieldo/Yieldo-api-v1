@@ -70,6 +70,14 @@ async def get_quote(req: QuoteRequest, request: Request):
         enrolled = partner.get("enrolled_vaults", [])
         if enrolled and req.vault_id not in enrolled:
             raise HTTPException(status_code=403, detail=f"Vault {req.vault_id} not in your enrolled vaults")
+    elif req.referrer and req.referrer.lower() != "0x0000000000000000000000000000000000000000":
+        # Referral flow: if the referrer resolves to a registered KOL, honor their fee_enabled.
+        # Regular users without a KOL-linked referrer always pay FEE_BPS (below).
+        kol = await database.get_kol_by_referrer(req.referrer)
+        if kol and not kol.get("fee_enabled", True):
+            fee_bps = 0
+        else:
+            fee_bps = FEE_BPS
     else:
         fee_bps = FEE_BPS
 

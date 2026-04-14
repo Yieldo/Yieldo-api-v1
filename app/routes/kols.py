@@ -65,6 +65,7 @@ async def resolve_handle(handle: str):
         "handle": kol["handle"],
         "name": kol["name"],
         "address": kol.get("fee_collector_address", kol["address"]),
+        "fee_enabled": kol.get("fee_enabled", True),
     }
 
 
@@ -178,6 +179,7 @@ async def get_profile(kol: dict = Depends(get_current_kol)):
         name=kol["name"],
         bio=kol.get("bio", ""),
         twitter=kol.get("twitter", ""),
+        fee_enabled=kol.get("fee_enabled", True),
         fee_collector_address=kol.get("fee_collector_address", kol["address"]),
         enrolled_vaults=kol.get("enrolled_vaults", []),
         created_at=kol["created_at"].isoformat() if kol.get("created_at") else "",
@@ -197,6 +199,8 @@ async def update_settings(
         fields["bio"] = req.bio
     if req.twitter is not None:
         fields["twitter"] = req.twitter
+    if req.fee_enabled is not None:
+        fields["fee_enabled"] = req.fee_enabled
     if req.fee_collector_address is not None:
         fields["fee_collector_address"] = req.fee_collector_address.lower()
     if not fields:

@@ -485,6 +485,15 @@ async def get_kol_by_handle(handle: str) -> Optional[dict]:
     return await _db["kols"].find_one({"handle": handle.lower()})
 
 
+async def get_kol_by_referrer(addr: str) -> Optional[dict]:
+    """Find a KOL whose main address OR fee_collector_address matches. Used by quote
+    flow to resolve on-chain referrer back to its KOL record for fee_enabled lookup."""
+    if _db is None:
+        return None
+    a = addr.lower()
+    return await _db["kols"].find_one({"$or": [{"address": a}, {"fee_collector_address": a}]})
+
+
 async def update_kol(address: str, fields: dict):
     if _db is None:
         return

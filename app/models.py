@@ -329,6 +329,7 @@ class KolProfile(BaseModel):
     name: str
     bio: str = ""
     twitter: str = ""
+    fee_enabled: bool = True
     fee_collector_address: str = ""
     enrolled_vaults: list[str] = []
     created_at: str = ""
@@ -348,6 +349,7 @@ class KolSettingsUpdate(BaseModel):
     name: Optional[str] = None
     bio: Optional[str] = None
     twitter: Optional[str] = None
+    fee_enabled: Optional[bool] = None
     fee_collector_address: Optional[str] = None
 
 

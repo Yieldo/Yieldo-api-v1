@@ -10,7 +10,9 @@ from app.core.constants import EIP712_DOMAIN_NAME, EIP712_DOMAIN_VERSION, EIP712
 from app.core.config import get_settings
 from app.services.rpc import (
     get_nonce, sign_withdraw_intent, encode_withdraw_calldata,
+    encode_claim_calldata, get_erc20_balance,
 )
+from app.core.constants import DEPOSIT_ROUTER_ADDRESSES
 from app.services.vault import get_vault, get_vault_response
 from app.services import database
 
@@ -163,5 +165,53 @@ async def withdraw_build(req: WithdrawBuildRequest):
 @router.get("/requests/{user_address}")
 async def get_pending_requests(user_address: str):
     """Return async withdraw requests this user has submitted through Yieldo.
-    Only tracked for vaults whose withdraw path is request-based (Midas async)."""
-    return await database.get_user_withdraw_requests(user_address)
+    Each entry is decorated with a live `claimable` flag determined by checking
+    whether the request's escrow has received the asset from the protocol yet."""
+    rows = await database.get_user_withdraw_requests(user_address)
+    for r in rows:
+        if r.get("status") == "claimed":
+            r["claimable"] = False
+            continue
+        escrow = r.get("escrow_address")
+        asset = r.get("asset")
+        chain_id = r.get("chain_id")
+        if not escrow or not asset or not chain_id:
+            r["claimable"] = False
+            continue
+        try:
+            bal = get_erc20_balance(chain_id, asset, escrow)
+            r["claimable"] = bal > 0
+            r["claimable_amount"] = str(bal)
+        except Exception:
+            r["claimable"] = False
+    return rows
+
+
+@router.get("/claim-tx/{req_hash}")
+async def get_claim_tx(req_hash: str, user_address: str):
+    """Build the claim transaction for a ready async request. Returns ready=false
+    if the protocol hasn't fulfilled yet, so the UI can keep the Claim button
+    disabled rather than let the user send a tx that would revert."""
+    row = await database.get_withdraw_by_req_hash(req_hash)
+    if not row or row.get("user", "").lower() != user_address.lower():
+        raise HTTPException(status_code=404, detail="Request not found")
+    if row.get("status") == "claimed":
+        return {"ready": False, "reason": "Already claimed"}
+    escrow = row.get("escrow_address")
+    asset = row.get("asset")
+    chain_id = row.get("chain_id")
+    if not escrow or not asset:
+        return {"ready": False, "reason": "Missing escrow info"}
+    bal = get_erc20_balance(chain_id, asset, escrow)
+    if bal == 0:
+        return {"ready": False, "reason": "Protocol has not fulfilled yet"}
+    router_addr = DEPOSIT_ROUTER_ADDRESSES.get(chain_id)
+    calldata = encode_claim_calldata(chain_id, bytes.fromhex(req_hash.replace("0x", "")))
+    return {
+        "ready": True,
+        "amount": str(bal),
+        "transaction_request": {
+            "to": router_addr, "data": calldata, "value": "0",
+            "chain_id": chain_id, "gas_limit": "250000",
+        },
+    }

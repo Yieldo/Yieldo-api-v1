@@ -529,6 +529,12 @@ async def mark_withdraw_claimed(req_hash: str, tx_hash: str):
     )
 
 
+async def get_withdraw_by_req_hash(req_hash: str) -> Optional[dict]:
+    if _db is None:
+        return None
+    return await _db["withdrawals"].find_one({"req_hash": req_hash.lower()})
+
+
 async def get_user_withdraw_requests(user_address: str) -> list[dict]:
     if _db is None:
         return []

@@ -38,7 +38,10 @@ async def get_quote(
         "toToken": to_token,
         "fromAddress": from_address,
         "slippage": str(slippage),
-        "order": "RECOMMENDED",
+        # CHEAPEST routes through Across for exotic destination tokens (wstETH, rUSD, USDe).
+        # RECOMMENDED prefers Stargate Fast whose destination composer step fails silently
+        # for non-native swaps — refunds as intermediate asset instead of delivering dest token.
+        "order": "CHEAPEST",
         "integrator": LIFI_INTEGRATOR,
     }
     resp = await client.get(f"{LIFI_BASE_URL}/quote", params=params, headers=_headers())

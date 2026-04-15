@@ -23,6 +23,7 @@ def get_w3(chain_id: int) -> Web3:
         8453: settings.base_rpc_url,
         42161: settings.arbitrum_rpc_url,
         10: settings.optimism_rpc_url,
+        143: settings.monad_rpc_url,
     }
     url = rpc_map.get(chain_id)
     if not url:

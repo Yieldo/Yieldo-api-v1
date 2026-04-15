@@ -11,6 +11,7 @@ NON_COMPOSER_CROSS_CHAIN_BUFFER = 0.97
 DEPOSIT_ROUTER_ADDRESSES: dict[int, str] = {
     1: "0x85f76c1685046Ea226E1148EE1ab81a8a15C385d",
     8453: "0xF6B7723661d52E8533c77479d3cad534B4D147Aa",
+    143: "0xCD8dfD627A3712C9a2B079398e0d524970D5E73F",
 }
 
 PYTH_CONTRACT_ADDRESSES: dict[int, str] = {
@@ -49,9 +50,14 @@ CHAIN_CONFIG: dict[int, dict] = {
         "key": "bsc",
         "explorer": "https://bscscan.com",
     },
+    143: {
+        "name": "Monad",
+        "key": "monad",
+        "explorer": "https://monadscan.com",
+    },
 }
 
-SOURCE_CHAINS = [1, 8453, 42161, 10, 43114, 56]
+SOURCE_CHAINS = [1, 8453, 42161, 10, 43114, 56, 143]
 
 ASSET_TOKEN_CONFIG: dict[int, dict[str, tuple[str, int]]] = {
     1: {

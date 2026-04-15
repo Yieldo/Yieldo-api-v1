@@ -461,8 +461,8 @@ def _build_eip712(intent: IntentData, chain_id: int, router_address: str) -> EIP
             chainId=chain_id,
             verifyingContract=router_address,
         ),
-        types=EIP712_TYPES,
-        message=intent,
+        types={"DepositIntent": EIP712_TYPES["DepositIntent"]},
+        message=_intent_eip712_message(intent),
     )
 
 

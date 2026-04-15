@@ -1,52 +1,95 @@
-import time
+"""Withdraw flow — V2.6.1+
+
+Withdrawals go DIRECT to the protocol (no router custody). The API builds
+the approval + withdraw calldata targeting the protocol contract itself,
+and the user's wallet signs/sends. Backend tracks via event indexing only.
+
+Per-protocol dispatch:
+ - morpho / custom / ipor → ERC-4626 redeem(shares, receiver, owner) on the vault
+ - midas (sync)            → Midas RV redeemInstant(tokenOut, amt, minOut)
+ - midas (async)           → Midas RV redeemRequest(tokenOut, amt)
+ - veda                    → reject (send user to Veda UI; AtomicQueue too complex to proxy)
+"""
 from fastapi import APIRouter, HTTPException
+from web3 import Web3
 
 from app.models import (
     WithdrawQuoteRequest, WithdrawQuoteResponse, WithdrawIntentData,
     WithdrawBuildRequest, WithdrawBuildResponse,
-    TransactionRequest, ApprovalData, EIP712Data, EIP712Domain,
+    TransactionRequest, ApprovalData,
 )
-from app.core.constants import EIP712_DOMAIN_NAME, EIP712_DOMAIN_VERSION, EIP712_TYPES
-from app.config import get_settings
-from app.services.rpc import (
-    get_nonce, sign_withdraw_intent, encode_withdraw_calldata,
-    encode_claim_calldata, get_erc20_balance,
-)
-from app.core.constants import DEPOSIT_ROUTER_ADDRESSES
+from app.services.rpc import get_vault_convert_to_assets, get_w3
 from app.services.vault import get_vault, get_vault_response
 from app.services import database
 
 router = APIRouter(prefix="/v1/withdraw", tags=["withdraw"])
 
-ASYNC_TYPES = {"veda"}  # vaults that always use async request (not supported yet — return error)
+# Midas RedemptionVault addresses — keyed by share (mToken) address.
+# Found via scripts/verify-midas-rvs.js, all on Ethereum mainnet.
+MIDAS_REDEMPTION_VAULTS = {
+    "0x238a700ed6165261cf8b2e544ba797bc11e466ba": "0x44b0440e35c596e858cEA433D0d82F5a985fD19C",  # mFONE
+    "0xdd629e5241cbc5919847783e6c96b2de4754e438": "0x569D7dccBF6923350521ecBC28A555A500c4f0Ec",  # mTBILL
+    "0x9b5528528656dbc094765e2abb79f293c21191b9": "0x6Be2f55816efd0d91f52720f096006d63c366e98",  # mHYPER
+    "0xc8495eaff71d3a563b906295fcf2f685b1783085": "0x16d4f955B0aA1b1570Fe3e9bB2f8c19C407cdb67",  # HyperBTC
+    "0x7cf9dec92ca9fd46f8d86e7798b72624bc116c05": "0x5aeA6D35ED7B3B7aE78694B7da2Ee880756Af5C0",  # mAPOLLO
+    "0x030b69280892c888670edcdcd8b69fd8026a0bf3": "0xac14a14f578C143625Fc8F54218911e8F634184D",  # mMEV
+    "0x5a42864b14c0c8241ef5ab62dae975b163a2e0c1": "0x15f724b35A75F0c28F352b952eA9D1b24e348c57",  # mHyperETH
+    "0x87c9053c819bb28e0d73d33059e1b3da80afb0cf": "0x5356B8E06589DE894D86B24F4079c629E8565234",  # mRe7YIELD
+}
 
-
-def _eip712_withdraw(intent: WithdrawIntentData, chain_id: int, router_address: str) -> EIP712Data:
-    return EIP712Data(
-        domain=EIP712Domain(
-            name=EIP712_DOMAIN_NAME, version=EIP712_DOMAIN_VERSION,
-            chainId=chain_id, verifyingContract=router_address,
-        ),
-        types={"WithdrawIntent": EIP712_TYPES["WithdrawIntent"]},
-        primaryType="WithdrawIntent",
-        message={
-            "user": intent.user, "vault": intent.vault, "asset": intent.asset,
-            "shares": intent.shares, "minAmountOut": intent.min_amount_out,
-            "nonce": intent.nonce, "deadline": intent.deadline,
-        },
-    )
+ERC4626_REDEEM_ABI = [{
+    "name": "redeem", "type": "function", "stateMutability": "nonpayable",
+    "inputs": [
+        {"name": "shares", "type": "uint256"},
+        {"name": "receiver", "type": "address"},
+        {"name": "owner", "type": "address"},
+    ],
+    "outputs": [{"name": "", "type": "uint256"}],
+}]
+MIDAS_REDEEM_INSTANT_ABI = [{
+    "name": "redeemInstant", "type": "function", "stateMutability": "nonpayable",
+    "inputs": [
+        {"name": "tokenOut", "type": "address"},
+        {"name": "amountMTokenIn", "type": "uint256"},
+        {"name": "minReceiveAmount", "type": "uint256"},
+    ],
+    "outputs": [],
+}]
+MIDAS_REDEEM_REQUEST_ABI = [{
+    "name": "redeemRequest", "type": "function", "stateMutability": "nonpayable",
+    "inputs": [
+        {"name": "tokenOut", "type": "address"},
+        {"name": "amountMTokenIn", "type": "uint256"},
+    ],
+    "outputs": [{"name": "", "type": "uint256"}],
+}]
 
 
 def _pick_mode(vault_type: str) -> str:
-    # Midas: try sync first (redeemInstant); if instant liquidity is exhausted,
-    # frontend retries in async mode. For Morpho/Custom: always sync. Veda: async-only.
-    if vault_type in ("morpho", "custom"):
-        return "sync"
     if vault_type == "midas":
-        return "sync"  # default; caller may request async
+        return "sync"  # default; client may request "async" explicitly
     if vault_type == "veda":
         return "async"
     return "sync"
+
+
+def _encode_redeem(w3: Web3, vault_addr: str, shares: int, user: str) -> str:
+    c = w3.eth.contract(address=Web3.to_checksum_address(vault_addr), abi=ERC4626_REDEEM_ABI)
+    return c.encode_abi(abi_element_identifier="redeem", args=[shares, Web3.to_checksum_address(user), Web3.to_checksum_address(user)])
+
+
+def _encode_midas_instant(w3: Web3, rv_addr: str, token_out: str, shares: int, min_out: int) -> str:
+    c = w3.eth.contract(address=Web3.to_checksum_address(rv_addr), abi=MIDAS_REDEEM_INSTANT_ABI)
+    return c.encode_abi(abi_element_identifier="redeemInstant", args=[
+        Web3.to_checksum_address(token_out), shares, min_out,
+    ])
+
+
+def _encode_midas_request(w3: Web3, rv_addr: str, token_out: str, shares: int) -> str:
+    c = w3.eth.contract(address=Web3.to_checksum_address(rv_addr), abi=MIDAS_REDEEM_REQUEST_ABI)
+    return c.encode_abi(abi_element_identifier="redeemRequest", args=[
+        Web3.to_checksum_address(token_out), shares,
+    ])
 
 
 @router.post("/quote", response_model=WithdrawQuoteResponse)
@@ -58,44 +101,48 @@ async def withdraw_quote(req: WithdrawQuoteRequest):
         raise HTTPException(status_code=400, detail=f"Vault {vault['name']} not supported")
 
     vault_type = vault.get("type", "morpho")
-    if vault_type in ASYNC_TYPES:
+    if vault_type == "veda":
         raise HTTPException(
             status_code=400,
-            detail=f"Withdrawals for {vault['name']} must be done via the protocol's website.",
+            detail=f"Withdrawals for {vault['name']} must be done via Veda's website.",
         )
 
-    to_chain = vault["chain_id"]
-    asset = vault["asset_address"]
-    vault_addr = vault["address"]
-    deposit_router = vault["deposit_router"]
     shares = int(req.shares)
     if shares <= 0:
         raise HTTPException(status_code=400, detail="shares must be > 0")
 
-    # Slippage protection: min assets = shares * pricePerShare * (1 - slippage)
-    # Pull price-per-share via vault.convertToAssets; fall back to 0 if unavailable (no protection).
-    from app.services.rpc import get_vault_convert_to_assets
+    to_chain = vault["chain_id"]
+    vault_addr = vault["address"]
+    asset = vault["asset_address"]
+
     try:
         est_assets = get_vault_convert_to_assets(to_chain, vault_addr, shares)
     except Exception:
         est_assets = 0
     min_amount_out = int(est_assets * (1 - req.slippage)) if est_assets > 0 else 0
 
-    settings = get_settings()
-    deadline = int(time.time()) + settings.intent_deadline_seconds
-    nonce = get_nonce(to_chain, req.user_address)
     mode = _pick_mode(vault_type)
 
-    sig = sign_withdraw_intent(
-        to_chain, deposit_router, req.user_address, vault_addr, asset,
-        shares, min_amount_out, nonce, deadline,
-    )
-
+    # Direct-to-protocol: no router, no backend signature. Return a plain
+    # intent object populated with the parameters the caller is about to use,
+    # so the existing UI contract keeps working.
     intent = WithdrawIntentData(
         user=req.user_address, vault=vault_addr, asset=asset,
         shares=str(shares), min_amount_out=str(min_amount_out),
-        nonce=str(nonce), deadline=str(deadline),
+        nonce="0", deadline="0",
     )
+
+    # Approval target: for Morpho/Custom/IPOR, no approval needed (user owns shares;
+    # ERC-4626 redeem burns from `owner=msg.sender`). For Midas, approve the RV.
+    if vault_type == "midas":
+        rv = MIDAS_REDEMPTION_VAULTS.get(vault_addr.lower())
+        if not rv:
+            raise HTTPException(status_code=400, detail=f"No RV configured for {vault['name']}")
+        approval = ApprovalData(token_address=vault_addr, spender_address=rv, amount=str(shares))
+    else:
+        # For ERC-4626 redeem, the caller is the owner — no allowance needed.
+        # Return a zero-approval marker so the UI can skip the approve step.
+        approval = ApprovalData(token_address=vault_addr, spender_address=vault_addr, amount="0")
 
     return WithdrawQuoteResponse(
         vault=get_vault_response(req.vault_id),
@@ -104,13 +151,9 @@ async def withdraw_quote(req: WithdrawQuoteRequest):
         estimated_assets=str(est_assets) if est_assets > 0 else None,
         min_amount_out=str(min_amount_out),
         intent=intent,
-        eip712=_eip712_withdraw(intent, to_chain, deposit_router),
-        signature=sig,
-        approval=ApprovalData(
-            token_address=vault_addr,
-            spender_address=deposit_router,
-            amount=str(shares),
-        ),
+        eip712=None,  # no signed intent on direct path
+        signature="",
+        approval=approval,
     )
 
 
@@ -120,39 +163,43 @@ async def withdraw_build(req: WithdrawBuildRequest):
     if not vault:
         raise HTTPException(status_code=404, detail=f"Vault {req.vault_id} not found")
     vault_type = vault.get("type", "morpho")
-    if vault_type in ASYNC_TYPES:
-        raise HTTPException(status_code=400, detail="Async-only vaults not supported via router")
+    if vault_type == "veda":
+        raise HTTPException(status_code=400, detail="Veda withdrawals must be done via protocol UI")
 
     to_chain = vault["chain_id"]
-    asset = vault["asset_address"]
     vault_addr = vault["address"]
-    deposit_router = vault["deposit_router"]
-    sig_bytes = bytes.fromhex(req.signature.replace("0x", ""))
+    asset = vault["asset_address"]
+    shares = int(req.shares)
+    min_out = int(req.min_amount_out)
+    w3 = get_w3(to_chain)
 
     if req.mode not in ("sync", "async"):
         raise HTTPException(status_code=400, detail="mode must be sync or async")
 
-    fn = "withdrawWithIntent" if req.mode == "sync" else "withdrawRequestWithIntent"
-    calldata = encode_withdraw_calldata(
-        to_chain, fn, req.user_address, vault_addr, asset,
-        int(req.shares), int(req.min_amount_out), int(req.nonce), int(req.deadline),
-        sig_bytes,
-    )
-
-    # Midas withdraw path (sync redeemInstant or async request) both touch Midas's RV — budget
-    # matches deposit path; others fit in 500k.
-    gas_limit = "900000" if vault_type in ("midas", "veda") else "500000"
+    if vault_type == "midas":
+        rv = MIDAS_REDEMPTION_VAULTS.get(vault_addr.lower())
+        if not rv:
+            raise HTTPException(status_code=400, detail="No RV configured for this Midas vault")
+        if req.mode == "sync":
+            calldata = _encode_midas_instant(w3, rv, asset, shares, min_out)
+        else:
+            calldata = _encode_midas_request(w3, rv, asset, shares)
+        target = rv
+        gas_limit = "900000"
+        approval = ApprovalData(token_address=vault_addr, spender_address=rv, amount=str(shares))
+    else:
+        # ERC-4626 redeem — caller owns the shares, no approval needed.
+        calldata = _encode_redeem(w3, vault_addr, shares, req.user_address)
+        target = vault_addr
+        gas_limit = "500000"
+        approval = ApprovalData(token_address=vault_addr, spender_address=vault_addr, amount="0")
 
     resp = WithdrawBuildResponse(
         transaction_request=TransactionRequest(
-            to=deposit_router, data=calldata, value="0",
+            to=target, data=calldata, value="0",
             chain_id=to_chain, gas_limit=gas_limit,
         ),
-        approval=ApprovalData(
-            token_address=vault_addr,
-            spender_address=deposit_router,
-            amount=str(req.shares),
-        ),
+        approval=approval,
         mode=req.mode,
     )
     resp.tracking_id = await database.save_withdraw(
@@ -164,54 +211,7 @@ async def withdraw_build(req: WithdrawBuildRequest):
 
 @router.get("/requests/{user_address}")
 async def get_pending_requests(user_address: str):
-    """Return async withdraw requests this user has submitted through Yieldo.
-    Each entry is decorated with a live `claimable` flag determined by checking
-    whether the request's escrow has received the asset from the protocol yet."""
-    rows = await database.get_user_withdraw_requests(user_address)
-    for r in rows:
-        if r.get("status") == "claimed":
-            r["claimable"] = False
-            continue
-        escrow = r.get("escrow_address")
-        asset = r.get("asset")
-        chain_id = r.get("chain_id")
-        if not escrow or not asset or not chain_id:
-            r["claimable"] = False
-            continue
-        try:
-            bal = get_erc20_balance(chain_id, asset, escrow)
-            r["claimable"] = bal > 0
-            r["claimable_amount"] = str(bal)
-        except Exception:
-            r["claimable"] = False
-    return rows
-
-
-@router.get("/claim-tx/{req_hash}")
-async def get_claim_tx(req_hash: str, user_address: str):
-    """Build the claim transaction for a ready async request. Returns ready=false
-    if the protocol hasn't fulfilled yet, so the UI can keep the Claim button
-    disabled rather than let the user send a tx that would revert."""
-    row = await database.get_withdraw_by_req_hash(req_hash)
-    if not row or row.get("user", "").lower() != user_address.lower():
-        raise HTTPException(status_code=404, detail="Request not found")
-    if row.get("status") == "claimed":
-        return {"ready": False, "reason": "Already claimed"}
-    escrow = row.get("escrow_address")
-    asset = row.get("asset")
-    chain_id = row.get("chain_id")
-    if not escrow or not asset:
-        return {"ready": False, "reason": "Missing escrow info"}
-    bal = get_erc20_balance(chain_id, asset, escrow)
-    if bal == 0:
-        return {"ready": False, "reason": "Protocol has not fulfilled yet"}
-    router_addr = DEPOSIT_ROUTER_ADDRESSES.get(chain_id)
-    calldata = encode_claim_calldata(chain_id, bytes.fromhex(req_hash.replace("0x", "")))
-    return {
-        "ready": True,
-        "amount": str(bal),
-        "transaction_request": {
-            "to": router_addr, "data": calldata, "value": "0",
-            "chain_id": chain_id, "gas_limit": "250000",
-        },
-    }
+    """Async withdraw requests submitted through Yieldo. Direct-to-protocol
+    means fulfillment tokens land in the user's own wallet — no claim step.
+    We just track `status` for dashboard UX."""
+    return await database.get_user_withdraw_requests(user_address)

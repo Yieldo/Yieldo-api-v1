@@ -176,8 +176,8 @@ class WithdrawQuoteResponse(BaseModel):
     estimated_assets: Optional[str] = None
     min_amount_out: str
     intent: WithdrawIntentData
-    eip712: EIP712Data
-    signature: str
+    eip712: Optional[EIP712Data] = None  # None on direct-to-protocol path
+    signature: str = ""
     approval: ApprovalData
 
 

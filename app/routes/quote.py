@@ -323,10 +323,26 @@ async def build_transaction(req: BuildRequest, request: Request):
         raise HTTPException(status_code=400, detail="No route found")
 
     bridge = lifi.extract_bridge_from_quote(lifi_quote)
-    # Single-step for all vault types — router's depositWithIntentCrossChain handles
-    # Midas/Veda/Custom via _executeVaultCall. Two-step remains available as a fallback
-    # below if LiFi's contract-calls quote fails.
-    use_two_step = False
+
+    # Try single-step first (LiFi contract calls = bridge + deposit in one tx).
+    # If LiFi has no contract-call route for this leg (some newer chains / token
+    # combos don't), fall back to two-step: bridge to wallet, then same-chain deposit.
+    price_update = get_price_update(to_token)
+    pyth_fee = get_pyth_update_fee(to_chain, price_update)
+    fn_name = "depositWithIntentCrossChainERC4626" if is_erc4626 else "depositWithIntentCrossChain"
+    cc_calldata = encode_deposit_calldata(
+        to_chain, fn_name, req.user_address, vault["address"],
+        to_token, intent_amount, nonce, deadline, fee_bps,
+        sig_bytes, req.referrer, price_update,
+    )
+    cc_quote = await lifi.get_contract_calls_quote(
+        req.from_chain_id, req.from_token, req.from_amount,
+        to_chain, to_token, req.user_address,
+        deposit_router, cc_calldata, str(intent_amount),
+        preferred_bridges=[bridge] if bridge else None,
+        slippage=req.slippage,
+    )
+    use_two_step = cc_quote is None
 
     if use_two_step:
         # Two-step: Step 1 = bridge to user wallet, Step 2 = same-chain deposit
@@ -384,34 +400,7 @@ async def build_transaction(req: BuildRequest, request: Request):
             ),
         )
     else:
-        # Single-step: LiFi contract calls (bridge + deposit in one tx)
-        price_update = get_price_update(to_token)
-        pyth_fee = get_pyth_update_fee(to_chain, price_update)
-
-        fn_name = "depositWithIntentCrossChainERC4626" if is_erc4626 else "depositWithIntentCrossChain"
-        calldata = encode_deposit_calldata(
-            to_chain, fn_name, req.user_address, vault["address"],
-            to_token, intent_amount, nonce, deadline, fee_bps,
-            sig_bytes, req.referrer, price_update,
-        )
-
-        contract_call_amount = str(intent_amount)
-        preferred = [bridge] if bridge else None
-
-        cc_quote = await lifi.get_contract_calls_quote(
-            req.from_chain_id, req.from_token, req.from_amount,
-            to_chain, to_token, req.user_address,
-            deposit_router, calldata, contract_call_amount,
-            preferred_bridges=preferred,
-            slippage=req.slippage,
-        )
-
-        if not cc_quote:
-            raise HTTPException(
-                status_code=400,
-                detail="LiFi contract calls quote unavailable for this route. Use fallback flow.",
-            )
-
+        # Single-step: cc_quote already built above
         tx_req = cc_quote["transactionRequest"]
         approval_target = tx_req.get("to", deposit_router)
         used_bridge = lifi.extract_bridge_from_quote(cc_quote)

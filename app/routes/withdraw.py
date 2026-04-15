@@ -1,0 +1,167 @@
+import time
+from fastapi import APIRouter, HTTPException
+
+from app.models import (
+    WithdrawQuoteRequest, WithdrawQuoteResponse, WithdrawIntentData,
+    WithdrawBuildRequest, WithdrawBuildResponse,
+    TransactionRequest, ApprovalData, EIP712Data, EIP712Domain,
+)
+from app.core.constants import EIP712_DOMAIN_NAME, EIP712_DOMAIN_VERSION, EIP712_TYPES
+from app.core.config import get_settings
+from app.services.rpc import (
+    get_nonce, sign_withdraw_intent, encode_withdraw_calldata,
+)
+from app.services.vault import get_vault, get_vault_response
+from app.services import database
+
+router = APIRouter(prefix="/v1/withdraw", tags=["withdraw"])
+
+ASYNC_TYPES = {"veda"}  # vaults that always use async request (not supported yet — return error)
+
+
+def _eip712_withdraw(intent: WithdrawIntentData, chain_id: int, router_address: str) -> EIP712Data:
+    return EIP712Data(
+        domain=EIP712Domain(
+            name=EIP712_DOMAIN_NAME, version=EIP712_DOMAIN_VERSION,
+            chainId=chain_id, verifyingContract=router_address,
+        ),
+        types={"WithdrawIntent": EIP712_TYPES["WithdrawIntent"]},
+        primaryType="WithdrawIntent",
+        message={
+            "user": intent.user, "vault": intent.vault, "asset": intent.asset,
+            "shares": intent.shares, "minAmountOut": intent.min_amount_out,
+            "nonce": intent.nonce, "deadline": intent.deadline,
+        },
+    )
+
+
+def _pick_mode(vault_type: str) -> str:
+    # Midas: try sync first (redeemInstant); if instant liquidity is exhausted,
+    # frontend retries in async mode. For Morpho/Custom: always sync. Veda: async-only.
+    if vault_type in ("morpho", "custom"):
+        return "sync"
+    if vault_type == "midas":
+        return "sync"  # default; caller may request async
+    if vault_type == "veda":
+        return "async"
+    return "sync"
+
+
+@router.post("/quote", response_model=WithdrawQuoteResponse)
+async def withdraw_quote(req: WithdrawQuoteRequest):
+    vault = get_vault(req.vault_id)
+    if not vault:
+        raise HTTPException(status_code=404, detail=f"Vault {req.vault_id} not found")
+    if vault.get("type") == "unsupported":
+        raise HTTPException(status_code=400, detail=f"Vault {vault['name']} not supported")
+
+    vault_type = vault.get("type", "morpho")
+    if vault_type in ASYNC_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Withdrawals for {vault['name']} must be done via the protocol's website.",
+        )
+
+    to_chain = vault["chain_id"]
+    asset = vault["asset_address"]
+    vault_addr = vault["address"]
+    deposit_router = vault["deposit_router"]
+    shares = int(req.shares)
+    if shares <= 0:
+        raise HTTPException(status_code=400, detail="shares must be > 0")
+
+    # Slippage protection: min assets = shares * pricePerShare * (1 - slippage)
+    # Pull price-per-share via vault.convertToAssets; fall back to 0 if unavailable (no protection).
+    from app.services.rpc import get_vault_convert_to_assets
+    try:
+        est_assets = get_vault_convert_to_assets(to_chain, vault_addr, shares)
+    except Exception:
+        est_assets = 0
+    min_amount_out = int(est_assets * (1 - req.slippage)) if est_assets > 0 else 0
+
+    settings = get_settings()
+    deadline = int(time.time()) + settings.intent_deadline_seconds
+    nonce = get_nonce(to_chain, req.user_address)
+    mode = _pick_mode(vault_type)
+
+    sig = sign_withdraw_intent(
+        to_chain, deposit_router, req.user_address, vault_addr, asset,
+        shares, min_amount_out, nonce, deadline,
+    )
+
+    intent = WithdrawIntentData(
+        user=req.user_address, vault=vault_addr, asset=asset,
+        shares=str(shares), min_amount_out=str(min_amount_out),
+        nonce=str(nonce), deadline=str(deadline),
+    )
+
+    return WithdrawQuoteResponse(
+        vault=get_vault_response(req.vault_id),
+        mode=mode,
+        shares=str(shares),
+        estimated_assets=str(est_assets) if est_assets > 0 else None,
+        min_amount_out=str(min_amount_out),
+        intent=intent,
+        eip712=_eip712_withdraw(intent, to_chain, deposit_router),
+        signature=sig,
+        approval=ApprovalData(
+            token_address=vault_addr,
+            spender_address=deposit_router,
+            amount=str(shares),
+        ),
+    )
+
+
+@router.post("/build", response_model=WithdrawBuildResponse)
+async def withdraw_build(req: WithdrawBuildRequest):
+    vault = get_vault(req.vault_id)
+    if not vault:
+        raise HTTPException(status_code=404, detail=f"Vault {req.vault_id} not found")
+    vault_type = vault.get("type", "morpho")
+    if vault_type in ASYNC_TYPES:
+        raise HTTPException(status_code=400, detail="Async-only vaults not supported via router")
+
+    to_chain = vault["chain_id"]
+    asset = vault["asset_address"]
+    vault_addr = vault["address"]
+    deposit_router = vault["deposit_router"]
+    sig_bytes = bytes.fromhex(req.signature.replace("0x", ""))
+
+    if req.mode not in ("sync", "async"):
+        raise HTTPException(status_code=400, detail="mode must be sync or async")
+
+    fn = "withdrawWithIntent" if req.mode == "sync" else "withdrawRequestWithIntent"
+    calldata = encode_withdraw_calldata(
+        to_chain, fn, req.user_address, vault_addr, asset,
+        int(req.shares), int(req.min_amount_out), int(req.nonce), int(req.deadline),
+        sig_bytes,
+    )
+
+    # Midas withdraw path (sync redeemInstant or async request) both touch Midas's RV — budget
+    # matches deposit path; others fit in 500k.
+    gas_limit = "900000" if vault_type in ("midas", "veda") else "500000"
+
+    resp = WithdrawBuildResponse(
+        transaction_request=TransactionRequest(
+            to=deposit_router, data=calldata, value="0",
+            chain_id=to_chain, gas_limit=gas_limit,
+        ),
+        approval=ApprovalData(
+            token_address=vault_addr,
+            spender_address=deposit_router,
+            amount=str(req.shares),
+        ),
+        mode=req.mode,
+    )
+    resp.tracking_id = await database.save_withdraw(
+        user=req.user_address, vault_id=req.vault_id, vault_name=vault["name"],
+        shares=req.shares, asset=asset, mode=req.mode, chain_id=to_chain,
+    )
+    return resp
+
+
+@router.get("/requests/{user_address}")
+async def get_pending_requests(user_address: str):
+    """Return async withdraw requests this user has submitted through Yieldo.
+    Only tracked for vaults whose withdraw path is request-based (Midas async)."""
+    return await database.get_user_withdraw_requests(user_address)

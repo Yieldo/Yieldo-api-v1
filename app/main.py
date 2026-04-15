@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import vaults, quote, status, info, partners, kols, deposits, users
+from app.routes import vaults, quote, status, info, partners, kols, deposits, users, withdraw, positions
 from app.services.vault import load_vaults
 from app.services import database
 from app.config import get_settings
@@ -43,6 +43,8 @@ app.include_router(partners.router)
 app.include_router(kols.router)
 app.include_router(deposits.router)
 app.include_router(users.router)
+app.include_router(withdraw.router)
+app.include_router(positions.router)
 
 
 @app.get("/health")

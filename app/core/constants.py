@@ -89,5 +89,14 @@ EIP712_TYPES = {
         {"name": "nonce", "type": "uint256"},
         {"name": "deadline", "type": "uint256"},
         {"name": "feeBps", "type": "uint256"},
-    ]
+    ],
+    "WithdrawIntent": [
+        {"name": "user", "type": "address"},
+        {"name": "vault", "type": "address"},
+        {"name": "asset", "type": "address"},
+        {"name": "shares", "type": "uint256"},
+        {"name": "minAmountOut", "type": "uint256"},
+        {"name": "nonce", "type": "uint256"},
+        {"name": "deadline", "type": "uint256"},
+    ],
 }

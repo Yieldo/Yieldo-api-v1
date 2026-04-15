@@ -63,7 +63,7 @@ class EIP712Data(BaseModel):
     domain: EIP712Domain
     types: dict
     primaryType: str = "DepositIntent"
-    message: IntentData
+    message: dict
 
 
 class StepDetail(BaseModel):
@@ -150,6 +150,84 @@ class BuildResponse(BaseModel):
     tracking_id: Optional[str] = None
     two_step: bool = False
     deposit_tx: Optional[DepositStep] = None
+
+
+class WithdrawIntentData(BaseModel):
+    user: str
+    vault: str
+    asset: str
+    shares: str
+    min_amount_out: str
+    nonce: str
+    deadline: str
+
+
+class WithdrawQuoteRequest(BaseModel):
+    vault_id: str
+    shares: str
+    user_address: str
+    slippage: float = 0.01
+
+
+class WithdrawQuoteResponse(BaseModel):
+    vault: VaultResponse
+    mode: str  # "sync" | "async"
+    shares: str
+    estimated_assets: Optional[str] = None
+    min_amount_out: str
+    intent: WithdrawIntentData
+    eip712: EIP712Data
+    signature: str
+    approval: ApprovalData
+
+
+class WithdrawBuildRequest(BaseModel):
+    vault_id: str
+    shares: str
+    min_amount_out: str
+    user_address: str
+    nonce: str
+    deadline: str
+    signature: str
+    mode: str  # "sync" | "async"
+
+
+class WithdrawBuildResponse(BaseModel):
+    transaction_request: TransactionRequest
+    approval: ApprovalData
+    mode: str
+    tracking_id: Optional[str] = None
+
+
+class Position(BaseModel):
+    vault_id: str
+    vault_name: str
+    vault_address: str
+    chain_id: int
+    asset_symbol: str
+    asset_address: str
+    share_balance: str
+    share_decimals: int
+    vault_type: str
+
+
+class PositionsResponse(BaseModel):
+    user_address: str
+    positions: list[Position]
+
+
+class WithdrawRequestRecord(BaseModel):
+    req_hash: str
+    user_address: str
+    vault_id: str
+    vault_name: str
+    shares: str
+    asset_address: str
+    protocol_request_id: str
+    escrow_address: str
+    submitted_at: str
+    claimed: bool
+    tx_hash: str
 
 
 class SendingInfo(BaseModel):

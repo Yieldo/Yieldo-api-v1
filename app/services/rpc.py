@@ -126,6 +126,118 @@ def sign_intent(
     return "0x" + signed.signature.hex()
 
 
+def sign_withdraw_intent(
+    chain_id: int,
+    router_address: str,
+    user: str,
+    vault: str,
+    asset: str,
+    shares: int,
+    min_amount_out: int,
+    nonce: int,
+    deadline: int,
+) -> str:
+    settings = get_settings()
+    typed_data = {
+        "types": {
+            "EIP712Domain": [
+                {"name": "name", "type": "string"},
+                {"name": "version", "type": "string"},
+                {"name": "chainId", "type": "uint256"},
+                {"name": "verifyingContract", "type": "address"},
+            ],
+            "WithdrawIntent": EIP712_TYPES["WithdrawIntent"],
+        },
+        "primaryType": "WithdrawIntent",
+        "domain": {
+            "name": EIP712_DOMAIN_NAME,
+            "version": EIP712_DOMAIN_VERSION,
+            "chainId": chain_id,
+            "verifyingContract": Web3.to_checksum_address(router_address),
+        },
+        "message": {
+            "user": Web3.to_checksum_address(user),
+            "vault": Web3.to_checksum_address(vault),
+            "asset": Web3.to_checksum_address(asset),
+            "shares": shares,
+            "minAmountOut": min_amount_out,
+            "nonce": nonce,
+            "deadline": deadline,
+        },
+    }
+    signable = encode_typed_data(full_message=typed_data)
+    signed = Account.sign_message(signable, private_key=settings.signer_private_key)
+    return "0x" + signed.signature.hex()
+
+
+def encode_withdraw_calldata(
+    chain_id: int,
+    fn_name: str,
+    user: str,
+    vault: str,
+    asset: str,
+    shares: int,
+    min_amount_out: int,
+    nonce: int,
+    deadline: int,
+    signature: bytes,
+) -> str:
+    router = get_deposit_router(chain_id)
+    intent_tuple = (
+        Web3.to_checksum_address(user),
+        Web3.to_checksum_address(vault),
+        Web3.to_checksum_address(asset),
+        shares,
+        min_amount_out,
+        nonce,
+        deadline,
+    )
+    return router.encode_abi(abi_element_identifier=fn_name, args=[intent_tuple, signature])
+
+
+def encode_claim_calldata(chain_id: int, req_hash: bytes) -> str:
+    router = get_deposit_router(chain_id)
+    return router.encode_abi(abi_element_identifier="claimWithdrawRequest", args=[req_hash])
+
+
+def get_vault_convert_to_assets(chain_id: int, vault_address: str, shares: int) -> int:
+    """Call vault.convertToAssets(shares). Works for all ERC-4626-compliant vaults."""
+    w3 = get_w3(chain_id)
+    abi = [{
+        "inputs": [{"internalType": "uint256", "name": "shares", "type": "uint256"}],
+        "name": "convertToAssets",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    }]
+    c = w3.eth.contract(address=Web3.to_checksum_address(vault_address), abi=abi)
+    return int(c.functions.convertToAssets(shares).call())
+
+
+def get_erc20_balance(chain_id: int, token_address: str, holder: str) -> int:
+    w3 = get_w3(chain_id)
+    abi = [{
+        "inputs": [{"internalType": "address", "name": "account", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    }]
+    c = w3.eth.contract(address=Web3.to_checksum_address(token_address), abi=abi)
+    return int(c.functions.balanceOf(Web3.to_checksum_address(holder)).call())
+
+
+def batch_erc20_balances(chain_id: int, tokens: list[str], holder: str) -> dict[str, int]:
+    """Sequential balanceOf calls. For high fan-out, consider multicall3."""
+    out = {}
+    for t in tokens:
+        try:
+            out[t.lower()] = get_erc20_balance(chain_id, t, holder)
+        except Exception:
+            out[t.lower()] = 0
+    return out
+
+
 def encode_deposit_calldata(
     chain_id: int,
     fn_name: str,

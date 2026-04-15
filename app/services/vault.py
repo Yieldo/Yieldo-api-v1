@@ -50,6 +50,10 @@ def get_all_vaults() -> list[VaultResponse]:
     return [_to_response(v) for v in _vaults.values()]
 
 
+def get_all_vaults_raw() -> list[dict]:
+    return list(_vaults.values())
+
+
 def get_vault(vault_id: str) -> dict | None:
     return _vaults.get(vault_id.lower()) or _vaults.get(vault_id)
 

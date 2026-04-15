@@ -494,6 +494,55 @@ async def get_kol_by_referrer(addr: str) -> Optional[dict]:
     return await _db["kols"].find_one({"$or": [{"address": a}, {"fee_collector_address": a}]})
 
 
+async def save_withdraw(*, user: str, vault_id: str, vault_name: str, shares: str, asset: str, mode: str, chain_id: int) -> Optional[str]:
+    if _db is None:
+        return None
+    doc = {
+        "user": user.lower(), "vault_id": vault_id, "vault_name": vault_name,
+        "shares": shares, "asset": asset.lower(), "mode": mode, "chain_id": chain_id,
+        "status": "pending", "created_at": datetime.now(timezone.utc),
+    }
+    result = await _db["withdrawals"].insert_one(doc)
+    return str(result.inserted_id)
+
+
+async def mark_withdraw_request_submitted(tracking_id: str, *, req_hash: str, protocol_request_id: str, escrow: str, tx_hash: str):
+    if _db is None:
+        return
+    from bson import ObjectId
+    await _db["withdrawals"].update_one(
+        {"_id": ObjectId(tracking_id)},
+        {"$set": {
+            "req_hash": req_hash, "protocol_request_id": protocol_request_id,
+            "escrow_address": escrow, "tx_hash": tx_hash, "status": "submitted",
+            "submitted_at": datetime.now(timezone.utc),
+        }},
+    )
+
+
+async def mark_withdraw_claimed(req_hash: str, tx_hash: str):
+    if _db is None:
+        return
+    await _db["withdrawals"].update_one(
+        {"req_hash": req_hash},
+        {"$set": {"status": "claimed", "claim_tx": tx_hash, "claimed_at": datetime.now(timezone.utc)}},
+    )
+
+
+async def get_user_withdraw_requests(user_address: str) -> list[dict]:
+    if _db is None:
+        return []
+    docs = await _db["withdrawals"].find(
+        {"user": user_address.lower(), "mode": "async"},
+    ).sort("created_at", -1).to_list(length=200)
+    for d in docs:
+        d["id"] = str(d.pop("_id"))
+        for k in ("created_at", "submitted_at", "claimed_at"):
+            if k in d and isinstance(d[k], datetime):
+                d[k] = d[k].isoformat()
+    return docs
+
+
 async def update_kol(address: str, fields: dict):
     if _db is None:
         return

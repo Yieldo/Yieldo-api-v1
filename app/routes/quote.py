@@ -274,7 +274,13 @@ async def build_transaction(req: BuildRequest, request: Request):
     sig_bytes = bytes.fromhex(req.signature.replace("0x", ""))
 
     vault_type = vault.get("type", "morpho")
-    is_erc4626 = vault_type == "morpho"
+    # "ipor" is a standard ERC-4626 at the contract level but NOT in the LiFi
+    # Composer allowlist — attempts to use composer result in partial-fill refunds.
+    is_erc4626 = vault_type in ("morpho", "ipor")
+    # Vault types LiFi Composer does NOT support. Listed at docs.li.fi/composer.
+    # Anything here is forced to two-step cross-chain routing — NEVER single-step.
+    NON_COMPOSER_TYPES = ("midas", "veda", "custom", "ipor")
+    force_two_step = vault_type in NON_COMPOSER_TYPES
     # Midas depositInstant + mTBILL transfer + fee accounting ~= 625-700k; others fit in 500k.
     deposit_gas_limit = "900000" if vault_type in ("midas", "veda") else "500000"
 
@@ -324,24 +330,28 @@ async def build_transaction(req: BuildRequest, request: Request):
 
     bridge = lifi.extract_bridge_from_quote(lifi_quote)
 
-    # Try single-step first (LiFi contract calls = bridge + deposit in one tx).
-    # If LiFi has no contract-call route for this leg (some newer chains / token
-    # combos don't), fall back to two-step: bridge to wallet, then same-chain deposit.
-    price_update = get_price_update(to_token)
-    pyth_fee = get_pyth_update_fee(to_chain, price_update)
-    fn_name = "depositWithIntentCrossChainERC4626" if is_erc4626 else "depositWithIntentCrossChain"
-    cc_calldata = encode_deposit_calldata(
-        to_chain, fn_name, req.user_address, vault["address"],
-        to_token, intent_amount, nonce, deadline, fee_bps,
-        sig_bytes, req.referrer, price_update,
-    )
-    cc_quote = await lifi.get_contract_calls_quote(
-        req.from_chain_id, req.from_token, req.from_amount,
-        to_chain, to_token, req.user_address,
-        deposit_router, cc_calldata, str(intent_amount),
-        preferred_bridges=[bridge] if bridge else None,
-        slippage=req.slippage,
-    )
+    # Decide routing. For protocols not on the LiFi Composer allowlist
+    # (see docs.li.fi/composer — IPOR/Midas/Veda/Custom are all excluded),
+    # we never attempt single-step: the composer call on destination is
+    # prone to partial-fill failures that leave the user with a refunded
+    # bridged token in their wallet instead of vault shares.
+    cc_quote = None
+    if not force_two_step:
+        price_update = get_price_update(to_token)
+        pyth_fee = get_pyth_update_fee(to_chain, price_update)
+        fn_name = "depositWithIntentCrossChainERC4626" if is_erc4626 else "depositWithIntentCrossChain"
+        cc_calldata = encode_deposit_calldata(
+            to_chain, fn_name, req.user_address, vault["address"],
+            to_token, intent_amount, nonce, deadline, fee_bps,
+            sig_bytes, req.referrer, price_update,
+        )
+        cc_quote = await lifi.get_contract_calls_quote(
+            req.from_chain_id, req.from_token, req.from_amount,
+            to_chain, to_token, req.user_address,
+            deposit_router, cc_calldata, str(intent_amount),
+            preferred_bridges=[bridge] if bridge else None,
+            slippage=req.slippage,
+        )
     use_two_step = cc_quote is None
 
     if use_two_step:

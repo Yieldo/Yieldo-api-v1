@@ -78,10 +78,10 @@
   {"address": "0xFaDe0C546f44e33C134c4036207B314AC643dc2E", "name": "Yearn OG ETH", "chain_id": 747474, "asset": "weth", "type": "morpho"},
   {"address": "0x61D4F9D3797BA4dA152238c53a6f93Fb665C3c1d", "name": "Steakhouse Prime USDC", "chain_id": 747474, "asset": "usdc", "type": "morpho"},
   {"address": "0xE4248e2105508FcBad3fe95691551d1AF14015f7", "name": "Gauntlet USDC", "chain_id": 747474, "asset": "usdc", "type": "morpho"},
-  {"address": "0xb8a451107a9f87fde481d4d686247d6e43ed715e", "name": "IPOR stETH Ethereum", "chain_id": 1, "asset": "steth", "type": "morpho"},
-  {"address": "0xe9385eff3f937fcb0f0085da9a3f53d6c2b4fb5f", "name": "Reservoir wsrUSD Looping", "chain_id": 1, "asset": "rusd", "type": "morpho"},
-  {"address": "0x604117f0c94561231060f56cd2ddd16245d434c5", "name": "AavEthena Loop Mainnet", "chain_id": 1, "asset": "usde", "type": "morpho"},
-  {"address": "0xf6cd9e8415162c8fb3c52676c7ca68812a34f76e", "name": "Reservoir ETH Yield", "chain_id": 1, "asset": "weth", "type": "morpho"},
-  {"address": "0xc4c00d8b323f37527eeda27c87412378be9f68ec", "name": "IPOR wstETH Base", "chain_id": 8453, "asset": "wsteth", "type": "morpho"},
-  {"address": "0xe47358eae04719f3cf7025e95d0ad202e68bd9b2", "name": "Reservoir BTC Yield", "chain_id": 1, "asset": "wbtc", "type": "morpho"}
+  {"address": "0xb8a451107a9f87fde481d4d686247d6e43ed715e", "name": "IPOR stETH Ethereum", "chain_id": 1, "asset": "steth", "type": "ipor"},
+  {"address": "0xe9385eff3f937fcb0f0085da9a3f53d6c2b4fb5f", "name": "Reservoir wsrUSD Looping", "chain_id": 1, "asset": "rusd", "type": "ipor"},
+  {"address": "0x604117f0c94561231060f56cd2ddd16245d434c5", "name": "AavEthena Loop Mainnet", "chain_id": 1, "asset": "usde", "type": "ipor"},
+  {"address": "0xf6cd9e8415162c8fb3c52676c7ca68812a34f76e", "name": "Reservoir ETH Yield", "chain_id": 1, "asset": "weth", "type": "ipor"},
+  {"address": "0xc4c00d8b323f37527eeda27c87412378be9f68ec", "name": "IPOR wstETH Base", "chain_id": 8453, "asset": "wsteth", "type": "ipor"},
+  {"address": "0xe47358eae04719f3cf7025e95d0ad202e68bd9b2", "name": "Reservoir BTC Yield", "chain_id": 1, "asset": "wbtc", "type": "ipor"}
 ]

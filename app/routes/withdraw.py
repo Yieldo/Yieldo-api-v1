@@ -7,7 +7,7 @@ from app.models import (
     TransactionRequest, ApprovalData, EIP712Data, EIP712Domain,
 )
 from app.core.constants import EIP712_DOMAIN_NAME, EIP712_DOMAIN_VERSION, EIP712_TYPES
-from app.core.config import get_settings
+from app.config import get_settings
 from app.services.rpc import (
     get_nonce, sign_withdraw_intent, encode_withdraw_calldata,
     encode_claim_calldata, get_erc20_balance,

@@ -281,8 +281,9 @@ async def build_transaction(req: BuildRequest, request: Request):
     # Anything here is forced to two-step cross-chain routing — NEVER single-step.
     NON_COMPOSER_TYPES = ("midas", "veda", "custom", "ipor")
     force_two_step = vault_type in NON_COMPOSER_TYPES
-    # Midas depositInstant + mTBILL transfer + fee accounting ~= 625-700k; others fit in 500k.
-    deposit_gas_limit = "900000" if vault_type in ("midas", "veda") else "500000"
+    # Midas depositInstant ~= 625-700k; IPOR PlasmaVault deposit ~= 550k (internal
+    # Fusion market operations); Morpho/Custom fit in 500k.
+    deposit_gas_limit = "900000" if vault_type in ("midas", "veda", "ipor") else "500000"
 
     if is_direct:
         fn_name = "depositWithIntentERC4626" if is_erc4626 else "depositWithIntent"

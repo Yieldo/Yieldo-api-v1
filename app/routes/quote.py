@@ -278,7 +278,7 @@ async def build_transaction(req: BuildRequest, request: Request):
     # call follows the standard ERC-4626 `deposit(uint256, address)` shape. Lido
     # has its own custom adapter branch in the router — uses the non-ERC4626 path
     # through depositWithIntent so the router can route to the SyncDepositQueue.
-    is_erc4626 = vault_type in ("morpho", "ipor")
+    is_erc4626 = vault_type in ("morpho", "ipor", "accountable")
     # Vault types LiFi Composer does NOT support. Listed at docs.li.fi/composer.
     # Anything here is forced to two-step cross-chain routing — NEVER single-step.
     NON_COMPOSER_TYPES = ("midas", "veda", "custom", "ipor", "lido")

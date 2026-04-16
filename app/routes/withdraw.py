@@ -106,6 +106,17 @@ async def withdraw_quote(req: WithdrawQuoteRequest):
             status_code=400,
             detail=f"Withdrawals for {vault['name']} must be done via Veda's website.",
         )
+    if vault_type == "ipor" or vault_type == "lido":
+        # IPOR leveraged Plasma Vaults and Lido Earn vaults have no instant-redeem
+        # liquidity for direct ERC-4626 redeem(). They require the protocol's
+        # native scheduled-withdraw flow (requestWithdraw + wait + finalizeWithdraw)
+        # which we don't yet proxy. Users should use the protocol's own UI.
+        brand = "IPOR" if vault_type == "ipor" else "Lido Earn"
+        site = "https://app.ipor.io" if vault_type == "ipor" else "https://earn.lido.fi"
+        raise HTTPException(
+            status_code=400,
+            detail=f"Withdrawals for {vault['name']} must be done via {brand}'s website ({site}). This vault uses a scheduled-withdraw flow not yet supported by the Yieldo router.",
+        )
 
     shares = int(req.shares)
     if shares <= 0:
@@ -163,8 +174,9 @@ async def withdraw_build(req: WithdrawBuildRequest):
     if not vault:
         raise HTTPException(status_code=404, detail=f"Vault {req.vault_id} not found")
     vault_type = vault.get("type", "morpho")
-    if vault_type == "veda":
-        raise HTTPException(status_code=400, detail="Veda withdrawals must be done via protocol UI")
+    if vault_type in ("veda", "ipor", "lido"):
+        brand = {"veda": "Veda", "ipor": "IPOR", "lido": "Lido Earn"}[vault_type]
+        raise HTTPException(status_code=400, detail=f"{brand} withdrawals must be done via protocol UI")
 
     to_chain = vault["chain_id"]
     vault_addr = vault["address"]

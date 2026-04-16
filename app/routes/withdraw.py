@@ -189,9 +189,13 @@ async def withdraw_build(req: WithdrawBuildRequest):
         approval = ApprovalData(token_address=vault_addr, spender_address=rv, amount=str(shares))
     else:
         # ERC-4626 redeem — caller owns the shares, no approval needed.
+        # Gas headroom: Morpho MetaMorpho + IPOR PlasmaVault redeems cascade through
+        # multiple internal markets (Morpho Blue / IPOR Fusion) and can exceed 1M gas
+        # for moderately-sized positions. 1.5M covers real observed usage (~1.17M on
+        # Hyperithm USDC Apex) with a 28% safety buffer. Unused gas refunds to user.
         calldata = _encode_redeem(w3, vault_addr, shares, req.user_address)
         target = vault_addr
-        gas_limit = "500000"
+        gas_limit = "1500000"
         approval = ApprovalData(token_address=vault_addr, spender_address=vault_addr, amount="0")
 
     resp = WithdrawBuildResponse(

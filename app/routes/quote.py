@@ -274,16 +274,18 @@ async def build_transaction(req: BuildRequest, request: Request):
     sig_bytes = bytes.fromhex(req.signature.replace("0x", ""))
 
     vault_type = vault.get("type", "morpho")
-    # "ipor" is a standard ERC-4626 at the contract level but NOT in the LiFi
-    # Composer allowlist — attempts to use composer result in partial-fill refunds.
+    # Router uses depositWithIntentERC4626 for types whose eventual vault.deposit
+    # call follows the standard ERC-4626 `deposit(uint256, address)` shape. Lido
+    # has its own custom adapter branch in the router — uses the non-ERC4626 path
+    # through depositWithIntent so the router can route to the SyncDepositQueue.
     is_erc4626 = vault_type in ("morpho", "ipor")
     # Vault types LiFi Composer does NOT support. Listed at docs.li.fi/composer.
     # Anything here is forced to two-step cross-chain routing — NEVER single-step.
-    NON_COMPOSER_TYPES = ("midas", "veda", "custom", "ipor")
+    NON_COMPOSER_TYPES = ("midas", "veda", "custom", "ipor", "lido")
     force_two_step = vault_type in NON_COMPOSER_TYPES
-    # Midas depositInstant ~= 625-700k; IPOR PlasmaVault deposit ~= 550k (internal
-    # Fusion market operations); Morpho/Custom fit in 500k.
-    deposit_gas_limit = "900000" if vault_type in ("midas", "veda", "ipor") else "500000"
+    # Midas depositInstant ~= 625-700k; IPOR PlasmaVault ~= 550k; Lido SyncDepositQueue
+    # ~= 500k including the handleReport share mint; Morpho/Custom fit in 500k.
+    deposit_gas_limit = "900000" if vault_type in ("midas", "veda", "ipor", "lido") else "500000"
 
     if is_direct:
         fn_name = "depositWithIntentERC4626" if is_erc4626 else "depositWithIntent"

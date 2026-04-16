@@ -54,6 +54,8 @@ async def get_vault_detail(vault_id: str):
             "decimals": v["asset_decimals"],
         },
         deposit_router=v["deposit_router"],
+        type=v.get("type", "morpho"),
+        min_deposit=v.get("min_deposit"),
         total_assets=str(total_assets) if total_assets is not None else None,
         total_supply=str(total_supply) if total_supply is not None else None,
         share_price=share_price,

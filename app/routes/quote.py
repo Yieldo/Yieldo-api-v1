@@ -112,9 +112,13 @@ async def get_quote(req: QuoteRequest, request: Request):
     except Exception:
         total_assets, total_supply = 0, 0
 
+    min_deposit = int(vault["min_deposit"]) if vault.get("min_deposit") else 0
+
     if is_direct:
         fee = _compute_fee(from_amount_int, fee_bps)
         deposit_amount = from_amount_int - fee
+        if min_deposit and deposit_amount < min_deposit:
+            raise HTTPException(status_code=400, detail=f"Minimum deposit is {min_deposit / (10 ** vault['asset_decimals']):g} {vault['asset_symbol'].upper()}")
         estimated_shares = _compute_shares(deposit_amount, total_assets, total_supply)
         intent = IntentData(
             user=req.user_address,
@@ -178,6 +182,14 @@ async def get_quote(req: QuoteRequest, request: Request):
 
     fee = _compute_fee(to_amount_int, fee_bps)
     deposit_amount = to_amount_int - fee
+
+    # Reject if worst-case post-bridge amount is below vault minimum — otherwise
+    # the user pays bridge fees only to hit InsufficientAmount() on the vault.
+    if min_deposit:
+        worst_case_deposit = to_amount_min_int - _compute_fee(to_amount_min_int, fee_bps)
+        if worst_case_deposit < min_deposit:
+            human = min_deposit / (10 ** vault["asset_decimals"])
+            raise HTTPException(status_code=400, detail=f"Minimum deposit is {human:g} {vault['asset_symbol'].upper()} — increase your input amount.")
 
     if not is_same_chain:
         # Non-composer vault types (Midas/Veda/Custom) get a wider buffer since

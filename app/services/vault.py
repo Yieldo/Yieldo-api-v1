@@ -43,6 +43,7 @@ def load_vaults():
             "asset_decimals": asset_decimals,
             "deposit_router": DEPOSIT_ROUTER_ADDRESSES[chain_id],
             "type": v.get("type", "morpho"),
+            "min_deposit": v.get("min_deposit"),
         }
 
 
@@ -79,4 +80,5 @@ def _to_response(v: dict) -> VaultResponse:
         ),
         deposit_router=v["deposit_router"],
         type=v.get("type", "morpho"),
+        min_deposit=v.get("min_deposit"),
     )

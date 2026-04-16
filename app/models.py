@@ -24,6 +24,7 @@ class VaultResponse(BaseModel):
     asset: AssetInfo
     deposit_router: str
     type: str = "morpho"
+    min_deposit: Optional[str] = None
 
 
 class VaultDetailResponse(VaultResponse):

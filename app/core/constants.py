@@ -9,9 +9,12 @@ CROSS_CHAIN_SLIPPAGE_BUFFER = 0.99
 NON_COMPOSER_CROSS_CHAIN_BUFFER = 0.97
 
 DEPOSIT_ROUTER_ADDRESSES: dict[int, str] = {
-    1: "0x85f76c1685046Ea226E1148EE1ab81a8a15C385d",
-    8453: "0xF6B7723661d52E8533c77479d3cad534B4D147Aa",
-    143: "0xCD8dfD627A3712C9a2B079398e0d524970D5E73F",
+    1: "0x85f76c1685046Ea226E1148EE1ab81a8a15C385d",         # Ethereum
+    8453: "0xF6B7723661d52E8533c77479d3cad534B4D147Aa",      # Base
+    143: "0xCD8dfD627A3712C9a2B079398e0d524970D5E73F",        # Monad
+    10: "0x7554937Aa95195D744A6c45E0fd7D4F95A2F8F72",         # Optimism
+    42161: "0xC5700f4D8054BA982C39838D7C33442f54688bd2",     # Arbitrum
+    747474: "0xa682CD1c2Fd7c8545b401824096A600C2bD98F69",    # Katana
 }
 
 PYTH_CONTRACT_ADDRESSES: dict[int, str] = {
@@ -55,9 +58,19 @@ CHAIN_CONFIG: dict[int, dict] = {
         "key": "monad",
         "explorer": "https://monadscan.com",
     },
+    999: {
+        "name": "HyperEVM",
+        "key": "hyperevm",
+        "explorer": "https://hyperevmscan.io",
+    },
+    747474: {
+        "name": "Katana",
+        "key": "katana",
+        "explorer": "https://katanascan.com",
+    },
 }
 
-SOURCE_CHAINS = [1, 8453, 42161, 10, 43114, 56, 143]
+SOURCE_CHAINS = [1, 8453, 42161, 10, 43114, 56, 143, 999, 747474]
 
 ASSET_TOKEN_CONFIG: dict[int, dict[str, tuple[str, int]]] = {
     1: {

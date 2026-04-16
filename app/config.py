@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     arbitrum_rpc_url: str = "https://arb1.arbitrum.io/rpc"
     optimism_rpc_url: str = "https://mainnet.optimism.io"
     monad_rpc_url: str = "https://rpc.monad.xyz"
+    hyperliquid_rpc_url: str = "https://rpc.hyperliquid.xyz/evm"
+    katana_rpc_url: str = "https://rpc.katanarpc.com"
     mongodb_url: str = ""
     intent_deadline_seconds: int = 3600
     signer_private_key: str = ""

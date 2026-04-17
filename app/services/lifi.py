@@ -1,6 +1,6 @@
 import httpx
+from app.core.constants import LIFI_BASE_URL, LIFI_INTEGRATOR
 from app.config import get_settings
-from app.core.constants import LIFI_BASE_URL, LIFI_INTEGRATOR, UNSUPPORTED_BRIDGES
 
 _client: httpx.AsyncClient | None = None
 
@@ -28,6 +28,7 @@ async def get_quote(
     to_token: str,
     from_address: str,
     slippage: float = 0.03,
+    allowed_bridges: list[str] | None = None,
 ) -> dict | None:
     client = get_client()
     params = {
@@ -38,16 +39,66 @@ async def get_quote(
         "toToken": to_token,
         "fromAddress": from_address,
         "slippage": str(slippage),
-        # CHEAPEST routes through Across for exotic destination tokens (wstETH, rUSD, USDe).
-        # RECOMMENDED prefers Stargate Fast whose destination composer step fails silently
-        # for non-native swaps — refunds as intermediate asset instead of delivering dest token.
         "order": "CHEAPEST",
         "integrator": LIFI_INTEGRATOR,
     }
+    if allowed_bridges:
+        params["allowBridges"] = ",".join(allowed_bridges)
     resp = await client.get(f"{LIFI_BASE_URL}/quote", params=params, headers=_headers())
     if resp.status_code != 200:
         return None
     return resp.json()
+
+
+async def get_routes(
+    from_chain: int,
+    from_token: str,
+    from_amount: str,
+    to_chain: int,
+    to_token: str,
+    from_address: str,
+    slippage: float = 0.03,
+) -> list[dict]:
+    """Fetch multiple bridge route options from LiFi's advanced/routes endpoint."""
+    client = get_client()
+    body = {
+        "fromChainId": from_chain,
+        "fromTokenAddress": from_token,
+        "fromAmount": from_amount,
+        "toChainId": to_chain,
+        "toTokenAddress": to_token,
+        "fromAddress": from_address,
+        "slippage": slippage,
+        "integrator": LIFI_INTEGRATOR,
+    }
+    resp = await client.post(
+        f"{LIFI_BASE_URL}/advanced/routes",
+        json=body,
+        headers=_headers(),
+    )
+    if resp.status_code != 200:
+        return []
+    data = resp.json()
+    return data.get("routes", [])
+
+
+def extract_route_info(route: dict) -> dict:
+    """Extract bridge tool, name, logo, amounts, time, and gas from a route."""
+    step = route.get("steps", [{}])[0] if route.get("steps") else {}
+    tool_details = step.get("toolDetails", {})
+    estimate = step.get("estimate", {})
+    gas_costs = estimate.get("gasCosts", [])
+    gas_usd = sum(float(g.get("amountUSD", "0")) for g in gas_costs) if gas_costs else None
+    return {
+        "bridge": tool_details.get("key") or step.get("tool", ""),
+        "bridge_name": tool_details.get("name") or step.get("tool", ""),
+        "bridge_logo": tool_details.get("logoURI"),
+        "to_amount": route.get("toAmount", "0"),
+        "to_amount_min": route.get("toAmountMin", "0"),
+        "estimated_time": estimate.get("executionDuration"),
+        "gas_cost_usd": str(round(gas_usd, 2)) if gas_usd else None,
+        "tags": route.get("tags", []),
+    }
 
 
 async def get_contract_calls_quote(
@@ -106,9 +157,7 @@ async def get_contract_calls_quote(
         if mapped:
             body["allowExchanges"] = mapped
     elif not is_same_chain and preferred_bridges:
-        filtered = [b for b in preferred_bridges if b.lower() not in UNSUPPORTED_BRIDGES]
-        if filtered:
-            body["allowBridges"] = filtered
+        body["allowBridges"] = preferred_bridges
 
     resp = await client.post(
         f"{LIFI_BASE_URL}/quote/contractCalls",

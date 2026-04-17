@@ -95,7 +95,6 @@ ASSET_TOKEN_CONFIG: dict[int, dict[str, tuple[str, int]]] = {
     },
 }
 
-UNSUPPORTED_BRIDGES = ["near", "maya", "meson", "socket"]
 
 EIP712_DOMAIN_NAME = "DepositRouter"
 EIP712_DOMAIN_VERSION = "1"

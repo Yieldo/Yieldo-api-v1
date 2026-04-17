@@ -14,6 +14,7 @@ from app.models import (
     TransactionRequest,
     TrackingInfo,
     DepositStep,
+    RouteOption,
 )
 from app.core.constants import (
     FEE_BPS,
@@ -161,14 +162,11 @@ async def get_quote(req: QuoteRequest, request: Request):
             )
         return response
 
+    # Fetch multiple routes for the user to choose from, plus a single best
+    # quote (which includes transactionRequest for the approval target).
     lifi_quote = await lifi.get_quote(
-        req.from_chain_id,
-        req.from_token,
-        req.from_amount,
-        to_chain,
-        to_token,
-        req.user_address,
-        req.slippage,
+        req.from_chain_id, req.from_token, req.from_amount,
+        to_chain, to_token, req.user_address, req.slippage,
     )
     if not lifi_quote:
         raise HTTPException(status_code=400, detail="No route found for this token/chain combination")
@@ -191,13 +189,47 @@ async def get_quote(req: QuoteRequest, request: Request):
             human = min_deposit / (10 ** vault["asset_decimals"])
             raise HTTPException(status_code=400, detail=f"Minimum deposit is {human:g} {vault['asset_symbol'].upper()} — increase your input amount.")
 
+    # Build route options from LiFi's multi-route endpoint (cross-chain only).
+    # Same-chain swaps only have one DEX route so route selection isn't useful.
+    route_options = None
     if not is_same_chain:
-        # Non-composer vault types (Midas/Veda/Custom) get a wider buffer since
-        # their deposit path reverts the whole tx if the bridged amount lands below
-        # intent.amount — which would leave USDC stuck in the router.
+        routes = await lifi.get_routes(
+            req.from_chain_id, req.from_token, req.from_amount,
+            to_chain, to_token, req.user_address, req.slippage,
+        )
+        if routes:
+            best_to_amount = max(int(r.get("toAmount", "0")) for r in routes)
+            # Filter out junk routes (output < 50% of best)
+            viable = [r for r in routes if int(r.get("toAmount", "0")) > best_to_amount * 0.5]
+            options = []
+            for r in viable:
+                info = lifi.extract_route_info(r)
+                r_to_amount = int(info["to_amount"])
+                r_fee = _compute_fee(r_to_amount, fee_bps)
+                options.append(RouteOption(
+                    bridge=info["bridge"],
+                    bridge_name=info["bridge_name"],
+                    bridge_logo=info["bridge_logo"],
+                    to_amount=info["to_amount"],
+                    to_amount_min=info["to_amount_min"],
+                    deposit_amount=str(r_to_amount - r_fee),
+                    fee_amount=str(r_fee),
+                    estimated_time=info["estimated_time"],
+                    gas_cost_usd=info["gas_cost_usd"],
+                    tags=info["tags"],
+                ))
+            if options:
+                route_options = options
+
+    if not is_same_chain:
+        # Use worst-case to_amount_min across all shown routes for the intent.
+        # This is safe because the router accepts any amount >= intent_amount.
+        worst_min = to_amount_min_int
+        if route_options:
+            worst_min = min(worst_min, min(int(ro.to_amount_min) for ro in route_options))
         vault_type_for_buffer = vault.get("type", "morpho")
         buffer = NON_COMPOSER_CROSS_CHAIN_BUFFER if vault_type_for_buffer in ("midas", "veda", "custom") else CROSS_CHAIN_SLIPPAGE_BUFFER
-        intent_amount = int(int(to_amount_min) * buffer)
+        intent_amount = int(worst_min * buffer)
     else:
         intent_amount = to_amount_min_int
 
@@ -247,6 +279,7 @@ async def get_quote(req: QuoteRequest, request: Request):
             spender_address=approval_target,
             amount=req.from_amount,
         ),
+        route_options=route_options,
     )
     await database.save_quote(req.model_dump(), response.model_dump())
     if partner:
@@ -336,9 +369,11 @@ async def build_transaction(req: BuildRequest, request: Request):
         response.tracking_id = tracking_id
         return response
 
+    allowed_bridges = [req.preferred_bridge] if req.preferred_bridge else None
     lifi_quote = await lifi.get_quote(
         req.from_chain_id, req.from_token, req.from_amount,
         to_chain, to_token, req.user_address, req.slippage,
+        allowed_bridges=allowed_bridges,
     )
     if not lifi_quote:
         raise HTTPException(status_code=400, detail="No route found")

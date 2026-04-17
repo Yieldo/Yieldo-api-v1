@@ -77,6 +77,19 @@ class StepDetail(BaseModel):
     estimated_time: Optional[int] = None
 
 
+class RouteOption(BaseModel):
+    bridge: str
+    bridge_name: str
+    bridge_logo: Optional[str] = None
+    to_amount: str
+    to_amount_min: str
+    deposit_amount: str
+    fee_amount: str
+    estimated_time: Optional[int] = None
+    gas_cost_usd: Optional[str] = None
+    tags: list[str] = []
+
+
 class QuoteEstimate(BaseModel):
     from_amount: str
     from_amount_usd: Optional[str] = None
@@ -106,6 +119,7 @@ class QuoteResponse(BaseModel):
     eip712: EIP712Data
     signature: str
     approval: Optional[ApprovalData] = None
+    route_options: Optional[list[RouteOption]] = None
 
 
 class BuildRequest(BaseModel):
@@ -122,6 +136,7 @@ class BuildRequest(BaseModel):
     slippage: float = 0.03
     referrer: str = "0x0000000000000000000000000000000000000000"
     referrer_handle: str = ""
+    preferred_bridge: Optional[str] = None
 
 
 class TransactionRequest(BaseModel):

@@ -47,7 +47,10 @@ async def get_quote(
     resp = await client.get(f"{LIFI_BASE_URL}/quote", params=params, headers=_headers())
     if resp.status_code != 200:
         return None
-    return resp.json()
+    quote = resp.json()
+    if not quote or not quote.get("transactionRequest"):
+        return None
+    return quote
 
 
 async def get_routes(

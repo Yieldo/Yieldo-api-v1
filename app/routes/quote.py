@@ -197,11 +197,11 @@ async def get_quote(req: QuoteRequest, request: Request):
             req.from_chain_id, req.from_token, req.from_amount,
             to_chain, to_token, req.user_address, req.slippage,
         )
+        options = []
         if routes:
             best_to_amount = max(int(r.get("toAmount", "0")) for r in routes)
             # Filter out junk routes (output < 50% of best)
             viable = [r for r in routes if int(r.get("toAmount", "0")) > best_to_amount * 0.5]
-            options = []
             for r in viable:
                 info = lifi.extract_route_info(r)
                 r_to_amount = int(info["to_amount"])
@@ -218,8 +218,28 @@ async def get_quote(req: QuoteRequest, request: Request):
                     gas_cost_usd=info["gas_cost_usd"],
                     tags=info["tags"],
                 ))
-            if options:
-                route_options = options
+
+        # Ensure the main quote's bridge is always in route_options — the
+        # /quote and /advanced/routes endpoints can return different bridges.
+        main_bridge = lifi.extract_bridge_from_quote(lifi_quote)
+        if main_bridge and not any(o.bridge == main_bridge for o in options):
+            meta = lifi.extract_quote_metadata(lifi_quote)
+            main_td = lifi_quote.get("toolDetails", {})
+            options.insert(0, RouteOption(
+                bridge=main_bridge,
+                bridge_name=main_td.get("name") or main_bridge,
+                bridge_logo=main_td.get("logoURI"),
+                to_amount=to_amount,
+                to_amount_min=to_amount_min,
+                deposit_amount=str(deposit_amount),
+                fee_amount=str(fee),
+                estimated_time=meta.get("estimated_time"),
+                gas_cost_usd=meta.get("gas_cost_usd"),
+                tags=["RECOMMENDED", "CHEAPEST"],
+            ))
+
+        if options:
+            route_options = options
 
     if not is_same_chain:
         # Use worst-case to_amount_min across all shown routes for the intent.
@@ -375,6 +395,13 @@ async def build_transaction(req: BuildRequest, request: Request):
         to_chain, to_token, req.user_address, req.slippage,
         allowed_bridges=allowed_bridges,
     )
+    # If the preferred bridge can't build a tx (e.g. amount too small),
+    # fall back to any available bridge.
+    if not lifi_quote and allowed_bridges:
+        lifi_quote = await lifi.get_quote(
+            req.from_chain_id, req.from_token, req.from_amount,
+            to_chain, to_token, req.user_address, req.slippage,
+        )
     if not lifi_quote:
         raise HTTPException(status_code=400, detail="No route found")
 

@@ -1,6 +1,5 @@
 LIFI_BASE_URL = "https://li.quest/v1"
 LIFI_INTEGRATOR = "Yieldo"
-FEE_BPS = 10
 CROSS_CHAIN_SLIPPAGE_BUFFER = 0.99
 # Wider buffer for vault types without composer-native support (Midas, Veda, Custom).
 # Rationale: their deposit path is less tolerant of bridge-amount variance, and a revert
@@ -99,15 +98,6 @@ ASSET_TOKEN_CONFIG: dict[int, dict[str, tuple[str, int]]] = {
 EIP712_DOMAIN_NAME = "DepositRouter"
 EIP712_DOMAIN_VERSION = "1"
 EIP712_TYPES = {
-    "DepositIntent": [
-        {"name": "user", "type": "address"},
-        {"name": "vault", "type": "address"},
-        {"name": "asset", "type": "address"},
-        {"name": "amount", "type": "uint256"},
-        {"name": "nonce", "type": "uint256"},
-        {"name": "deadline", "type": "uint256"},
-        {"name": "feeBps", "type": "uint256"},
-    ],
     "WithdrawIntent": [
         {"name": "user", "type": "address"},
         {"name": "vault", "type": "address"},

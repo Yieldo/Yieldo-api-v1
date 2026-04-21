@@ -43,30 +43,6 @@ class QuoteRequest(BaseModel):
     referrer: str = "0x0000000000000000000000000000000000000000"
 
 
-class IntentData(BaseModel):
-    user: str
-    vault: str
-    asset: str
-    amount: str
-    nonce: str
-    deadline: str
-    fee_bps: str = "10"
-
-
-class EIP712Domain(BaseModel):
-    name: str
-    version: str
-    chainId: int
-    verifyingContract: str
-
-
-class EIP712Data(BaseModel):
-    domain: EIP712Domain
-    types: dict
-    primaryType: str = "DepositIntent"
-    message: dict
-
-
 class StepDetail(BaseModel):
     type: str
     tool: str
@@ -84,7 +60,6 @@ class RouteOption(BaseModel):
     to_amount: str
     to_amount_min: str
     deposit_amount: str
-    fee_amount: str
     estimated_time: Optional[int] = None
     gas_cost_usd: Optional[str] = None
     tags: list[str] = []
@@ -96,8 +71,6 @@ class QuoteEstimate(BaseModel):
     to_amount: str
     to_amount_min: str
     deposit_amount: str
-    fee_amount: str
-    fee_bps: int = 10
     estimated_shares: Optional[str] = None
     price_impact: Optional[float] = None
     estimated_time: Optional[int] = None
@@ -115,9 +88,6 @@ class QuoteResponse(BaseModel):
     quote_type: str
     vault: VaultResponse
     estimate: QuoteEstimate
-    intent: IntentData
-    eip712: EIP712Data
-    signature: str
     approval: Optional[ApprovalData] = None
     route_options: Optional[list[RouteOption]] = None
 
@@ -128,15 +98,12 @@ class BuildRequest(BaseModel):
     from_amount: str
     vault_id: str
     user_address: str
-    signature: str
-    intent_amount: str
-    nonce: str
-    deadline: str
-    fee_bps: str = "10"
     slippage: float = 0.03
     referrer: str = "0x0000000000000000000000000000000000000000"
     referrer_handle: str = ""
     preferred_bridge: Optional[str] = None
+    partner_id: str = ""
+    partner_type: int = 0
 
 
 class TransactionRequest(BaseModel):
@@ -161,7 +128,6 @@ class DepositStep(BaseModel):
 class BuildResponse(BaseModel):
     transaction_request: TransactionRequest
     approval: Optional[ApprovalData] = None
-    intent: IntentData
     tracking: TrackingInfo
     tracking_id: Optional[str] = None
     two_step: bool = False

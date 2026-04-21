@@ -53,11 +53,6 @@ def get_erc20_contract(chain_id: int, token_address: str) -> Contract:
     return w3.eth.contract(address=Web3.to_checksum_address(token_address), abi=ERC20_ABI)
 
 
-def get_nonce(chain_id: int, user_address: str) -> int:
-    router = get_deposit_router(chain_id)
-    return router.functions.getNonce(Web3.to_checksum_address(user_address)).call()
-
-
 def get_vault_asset(chain_id: int, vault_address: str) -> str:
     vault = get_vault_contract(chain_id, vault_address)
     return vault.functions.asset().call()
@@ -85,48 +80,64 @@ def get_vault_share_price(chain_id: int, vault_address: str) -> tuple[int, int]:
     return total_assets, total_supply
 
 
-def sign_intent(
+def get_nonce(chain_id: int, user_address: str) -> int:
+    """Get withdraw nonce from the deposit router (still needed for withdraw flow)."""
+    w3 = get_w3(chain_id)
+    addr = DEPOSIT_ROUTER_ADDRESSES.get(chain_id)
+    if not addr:
+        raise ValueError(f"No deposit router on chain {chain_id}")
+    # Call getNonce on the old router ABI — withdraw router still has this
+    abi = [{"inputs": [{"internalType": "address", "name": "user", "type": "address"}], "name": "getNonce", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"}]
+    c = w3.eth.contract(address=Web3.to_checksum_address(addr), abi=abi)
+    return c.functions.getNonce(Web3.to_checksum_address(user_address)).call()
+
+
+def encode_deposit_for_calldata(
     chain_id: int,
-    router_address: str,
-    user: str,
     vault: str,
     asset: str,
     amount: int,
-    nonce: int,
-    deadline: int,
-    fee_bps: int,
+    user: str,
+    partner_id: bytes,
+    partner_type: int,
+    is_erc4626: bool,
 ) -> str:
-    settings = get_settings()
-    typed_data = {
-        "types": {
-            "EIP712Domain": [
-                {"name": "name", "type": "string"},
-                {"name": "version", "type": "string"},
-                {"name": "chainId", "type": "uint256"},
-                {"name": "verifyingContract", "type": "address"},
-            ],
-            "DepositIntent": EIP712_TYPES["DepositIntent"],
-        },
-        "primaryType": "DepositIntent",
-        "domain": {
-            "name": EIP712_DOMAIN_NAME,
-            "version": EIP712_DOMAIN_VERSION,
-            "chainId": chain_id,
-            "verifyingContract": Web3.to_checksum_address(router_address),
-        },
-        "message": {
-            "user": Web3.to_checksum_address(user),
-            "vault": Web3.to_checksum_address(vault),
-            "asset": Web3.to_checksum_address(asset),
-            "amount": amount,
-            "nonce": nonce,
-            "deadline": deadline,
-            "feeBps": fee_bps,
-        },
-    }
-    signable = encode_typed_data(full_message=typed_data)
-    signed = Account.sign_message(signable, private_key=settings.signer_private_key)
-    return "0x" + signed.signature.hex()
+    router = get_deposit_router(chain_id)
+    return router.encode_abi(
+        abi_element_identifier="depositFor",
+        args=[
+            Web3.to_checksum_address(vault),
+            Web3.to_checksum_address(asset),
+            amount,
+            Web3.to_checksum_address(user),
+            partner_id,
+            partner_type,
+            is_erc4626,
+        ],
+    )
+
+
+def encode_deposit_request_for_calldata(
+    chain_id: int,
+    vault: str,
+    asset: str,
+    amount: int,
+    user: str,
+    partner_id: bytes,
+    partner_type: int,
+) -> str:
+    router = get_deposit_router(chain_id)
+    return router.encode_abi(
+        abi_element_identifier="depositRequestFor",
+        args=[
+            Web3.to_checksum_address(vault),
+            Web3.to_checksum_address(asset),
+            amount,
+            Web3.to_checksum_address(user),
+            partner_id,
+            partner_type,
+        ],
+    )
 
 
 def sign_withdraw_intent(
@@ -204,7 +215,6 @@ def encode_claim_calldata(chain_id: int, req_hash: bytes) -> str:
 
 
 def get_vault_convert_to_assets(chain_id: int, vault_address: str, shares: int) -> int:
-    """Call vault.convertToAssets(shares). Works for all ERC-4626-compliant vaults."""
     w3 = get_w3(chain_id)
     abi = [{
         "inputs": [{"internalType": "uint256", "name": "shares", "type": "uint256"}],
@@ -231,7 +241,6 @@ def get_erc20_balance(chain_id: int, token_address: str, holder: str) -> int:
 
 
 def batch_erc20_balances(chain_id: int, tokens: list[str], holder: str) -> dict[str, int]:
-    """Sequential balanceOf calls. For high fan-out, consider multicall3."""
     out = {}
     for t in tokens:
         try:
@@ -239,52 +248,3 @@ def batch_erc20_balances(chain_id: int, tokens: list[str], holder: str) -> dict[
         except Exception:
             out[t.lower()] = 0
     return out
-
-
-def encode_deposit_calldata(
-    chain_id: int,
-    fn_name: str,
-    user: str,
-    vault: str,
-    asset: str,
-    amount: int,
-    nonce: int,
-    deadline: int,
-    fee_bps: int,
-    signature: bytes,
-    referrer: str,
-    price_update: list[bytes] | None = None,
-) -> str:
-    router = get_deposit_router(chain_id)
-    intent_tuple = (
-        Web3.to_checksum_address(user),
-        Web3.to_checksum_address(vault),
-        Web3.to_checksum_address(asset),
-        amount,
-        nonce,
-        deadline,
-        fee_bps,
-    )
-    args = [intent_tuple, signature, Web3.to_checksum_address(referrer)]
-    if price_update is not None:
-        args.append(price_update)
-    return router.encode_abi(
-        abi_element_identifier=fn_name,
-        args=args,
-    )
-
-
-def get_deposit_record(chain_id: int, intent_hash: bytes) -> dict:
-    router = get_deposit_router(chain_id)
-    result = router.functions.getDeposit(intent_hash).call()
-    return {
-        "user": result[0],
-        "vault": result[1],
-        "asset": result[2],
-        "amount": result[3],
-        "deadline": result[4],
-        "timestamp": result[5],
-        "executed": result[6],
-        "cancelled": result[7],
-        "fee_bps": result[8],
-    }

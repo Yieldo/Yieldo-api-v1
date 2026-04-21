@@ -3,7 +3,6 @@ from app.models import StatusResponse, SendingInfo, ReceivingInfo
 from app.core.constants import CHAIN_CONFIG, DEPOSIT_ROUTER_ADDRESSES
 from app.services import lifi
 from app.services import database
-from app.services.rpc import get_deposit_record
 
 _LIFI_STATUS_MAP = {
     "DONE": "completed",
@@ -74,29 +73,3 @@ async def get_transfer_status(
     )
 
 
-@router.get("/intent-status")
-async def get_intent_status(
-    intent_hash: str = Query(..., description="Intent hash (bytes32 hex)"),
-    chain_id: int = Query(..., description="Chain ID where the deposit router lives"),
-):
-    if chain_id not in DEPOSIT_ROUTER_ADDRESSES:
-        raise HTTPException(status_code=400, detail=f"No deposit router on chain {chain_id}")
-    try:
-        intent_bytes = bytes.fromhex(intent_hash.replace("0x", ""))
-        record = get_deposit_record(chain_id, intent_bytes)
-        return {
-            "intent_hash": intent_hash,
-            "chain_id": chain_id,
-            "user": record["user"],
-            "vault": record["vault"],
-            "asset": record["asset"],
-            "amount": str(record["amount"]),
-            "deadline": str(record["deadline"]),
-            "timestamp": str(record["timestamp"]),
-            "executed": record["executed"],
-            "cancelled": record["cancelled"],
-            "fee_bps": str(record["fee_bps"]),
-            "explorer_link": _tx_link(chain_id, intent_hash),
-        }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))

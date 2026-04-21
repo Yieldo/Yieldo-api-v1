@@ -1,177 +1,129 @@
 ---
 title: "Deposit Router Contracts"
-description: "Smart contract architecture, intent system, and vault integrations"
+description: "Smart contract architecture, attribution system, and vault integrations"
 ---
 
-The Deposit Router is the core smart contract that executes vault deposits on behalf of users. It uses an intent-based architecture with EIP-712 signed messages that authorize deposits, and the router executes them.
+The Deposit Router is the core smart contract that executes vault deposits on behalf of users. It's an attribution-only pass-through — no fees are deducted, 100% of the user's tokens go into the vault, and a `Routed` event is emitted for on-chain attribution.
 
 ## Contract Addresses
 
-| Chain    | Chain ID | Address                                      |
-| -------- | -------- | -------------------------------------------- |
-| Ethereum | 1        | `0x85f76c1685046Ea226E1148EE1ab81a8a15C385d` |
-| Base     | 8453     | `0xF6B7723661d52E8533c77479d3cad534B4D147Aa` |
-
-## DepositIntent
-
-Every deposit starts with a signed intent:
-
-```solidity
-struct DepositIntent {
-    address user;       // Depositor's address
-    address vault;      // Target vault contract
-    address asset;      // Token being deposited (e.g. USDC)
-    uint256 amount;     // Amount to deposit
-    uint256 nonce;      // Per-user nonce (replay protection)
-    uint256 deadline;   // Unix timestamp after which intent expires
-    uint256 feeBps;     // Fee in basis points (e.g. 10 = 0.1%)
-}
-```
-
-The intent is signed via **EIP-712** with domain:
-
-```
-name: "DepositRouter"
-version: "1"
-chainId: <destination chain ID>
-verifyingContract: <deposit router address>
-```
+| Chain    | Chain ID | Address                                      | Version |
+| -------- | -------- | -------------------------------------------- | ------- |
+| Base     | 8453     | `0xF6B7723661d52E8533c77479d3cad534B4D147Aa` | V3.0    |
+| Ethereum | 1        | `0x85f76c1685046Ea226E1148EE1ab81a8a15C385d` | V2.7    |
+| Monad    | 143      | `0xCD8dfD627A3712C9a2B079398e0d524970D5E73F` | V2.7    |
+| Arbitrum | 42161    | `0xC5700f4D8054BA982C39838D7C33442f54688bd2` | V2.7    |
+| Optimism | 10       | `0x7554937Aa95195D744A6c45E0fd7D4F95A2F8F72` | V2.7    |
+| Katana   | 747474   | `0xa682CD1c2Fd7c8545b401824096A600C2bD98F69` | V2.7    |
 
 ## How Deposits Work
 
 ### Same-Chain Deposits
 
 ```
-Get quote (includes signed intent) → Approve token → Send tx to router
-                                          ↓
-                              Router pulls tokens from user
-                                          ↓
-                              Fee deducted (per intent feeBps)
-                                          ↓
-                              Tokens deposited into vault
-                                          ↓
-                              Vault shares sent to user
+User approves tokens to router → Calls depositFor() → Router deposits into vault → Shares sent to user → Routed event emitted
 ```
 
-The router calls `safeTransferFrom` to pull tokens from the user, deducts the fee, then deposits the remainder into the vault.
-
-### Cross-Chain Deposits
+### Cross-Chain Deposits (Two-Step)
 
 ```
-Get quote (includes signed intent) → Approve token → Send bridge tx (source chain)
-                                          ↓
-                              LiFi bridges tokens to destination chain
-                                          ↓
-                              Router receives tokens + executes deposit
-                                          ↓
-                              Slippage validated via oracle
-                                          ↓
-                              Fee deducted (per intent feeBps)
-                                          ↓
-                              Tokens deposited into vault
-                                          ↓
-                              Vault shares sent to user
+User sends bridge tx (source chain) → LiFi bridges tokens to user on destination → User approves + calls depositFor() on destination → Shares sent to user
 ```
 
-For cross-chain deposits, the bridge delivers tokens directly to the router contract. The router then validates slippage against a Pyth oracle, deducts fees, and deposits into the vault.
+### Cross-Chain Deposits (Single-Step, Composer)
+
+```
+User sends bridge tx → LiFi bridges + calls depositFor() on destination in one step → Shares sent to user
+```
+
+## depositFor
+
+The primary entry point for all deposits:
+
+```solidity
+function depositFor(
+    address vault,        // Target vault contract
+    address asset,        // Token being deposited
+    uint256 amount,       // Amount to deposit
+    address user,         // Recipient of vault shares
+    bytes32 partnerId,    // Attribution: hash of partner slug
+    uint8 partnerType,    // 0=direct, 1=kol, 2=wallet
+    bool isERC4626        // true for standard vaults, false for custom
+) external
+```
+
+Emits:
+
+```solidity
+event Routed(
+    bytes32 indexed partnerId,
+    uint8 partnerType,
+    address indexed user,
+    address indexed vault,
+    address asset,
+    uint256 amount
+);
+```
+
+## Vault Dispatch
+
+The router determines how to deposit based on this priority:
+
+1. **Vault Adapter** — if `vaultAdapters[vault]` is set, delegate to the adapter
+2. **Midas** — if `midasVaults[vault]` is set, use `depositInstant` on the issuance vault
+3. **Veda** — if `vedaTellers[vault]` is set, use `teller.deposit`
+4. **Lido** — if `lidoDepositQueues[vault][asset]` is set, use `queue.deposit`
+5. **ERC-4626** — if `isERC4626=true`, call `vault.deposit(amount, recipient)`
+6. **Custom** — call `vault.syncDeposit(amount, recipient, address(0))`
+
+### Vault Adapter Pattern
+
+New vault protocols can be integrated without upgrading the router. Deploy an adapter contract implementing `IVaultAdapter`:
+
+```solidity
+interface IVaultAdapter {
+    function deposit(
+        address vault,
+        address asset,
+        uint256 amount,
+        address recipient
+    ) external returns (uint256 shares);
+}
+```
+
+Then register it: `router.setVaultAdapter(vaultAddress, adapterAddress)`.
 
 ## Supported Vault Types
 
-The router supports multiple vault integration patterns:
-
 ### ERC-4626 Vaults
+Standard tokenized vault interface. Router calls `vault.deposit(amount, recipient)`.
 
-Standard tokenized vault interface. The router calls `vault.deposit(amount, recipient)` and shares are minted directly to the user.
-
-```solidity
-vault.deposit(depositAmount, recipient)
-```
+### Midas Vaults
+Deposits go through a separate issuance vault with `depositInstant`. Amount is normalized to 18 decimals.
 
 ### Veda BoringVault
+Deposits routed through a Teller contract: `teller.deposit(asset, amount, 0)`.
 
-For Veda protocol vaults, the router interacts with a Teller contract:
-
-```solidity
-teller.deposit(asset, depositAmount, 0)
-// Shares minted to router, then transferred to user
-```
+### Lido Earn
+Deposits through SyncDepositQueue: `queue.deposit(uint224(amount), address(0), proof)`. Reverts if the price report is stale.
 
 ### Request-Based Vaults
+For async deposits: `vault.requestDeposit(amount, recipient, controller)`.
 
-Some vaults use async deposits with a request queue:
+## Security
 
-```solidity
-vault.requestDeposit(amount, recipient, controller)
-// Returns a requestId for later fulfillment
-```
-
-## Revenue Share & Fees
-
-```
-feeAmount    = (amount * feeBps) / 10000    // feeBps set per intent (e.g. 10 = 0.1%)
-depositAmount = amount - feeAmount
-```
-
-Yieldo has agreements with curators and vault platforms to share revenue with wallets and distributors. 100% of curator revenue share is passed to the distributor.
-
-**On-chain fee distribution:**
-
-| Scenario                          | Fee Collector | Wallet/Distributor |
-| --------------------------------- | ------------- | ------------------ |
-| No referrer                       | 100%          | 0%                 |
-| With referrer (wallet/distributor)| 50%           | 50%                |
-
-Wallets and distributors earn 50% of the on-chain fee by passing their address as the `referrer` parameter. Referral earnings are tracked per token per referrer on-chain.
-
-## Cross-Chain Slippage Protection
-
-For cross-chain deposits, the router validates the received amount against the expected amount using a Pyth price oracle:
-
-```
-actualUsd >= expectedUsd * (10000 - maxSlippageBps) / 10000
-actualUsd >= minDepositUsd
-```
-
-This prevents deposits from executing if the bridge delivered significantly fewer tokens than expected.
-
-## Security Features
-
-- **Nonce replay protection** - Each intent increments the user's nonce, preventing the same intent from being used twice
-- **Deadline enforcement** - Intents expire after the specified deadline
-- **Pausable** - Owner can pause all operations in an emergency
-- **Reentrancy guard** - All deposit functions are protected against reentrancy
-- **Vault whitelist** - Optional access control to restrict which vaults can receive deposits
-- **Two-step ownership** - Prevents accidental ownership transfer
-
-## Intent Lifecycle
-
-```
-Created → Executed
-       → Cancelled (by user, before deadline)
-       → Expired (deadline passed, not executed)
-```
-
-Users can cancel unexecuted intents before the deadline by calling `cancelIntent(intentHash)`.
+- **No custody** — tokens are held only for the duration of the transaction (single block)
+- **No fees** — 100% of tokens go to the vault
+- **Pausable** — owner can pause all operations in an emergency
+- **Reentrancy guard** — all deposit functions are protected
+- **Vault whitelist** — optional access control for approved vaults
+- **Two-step ownership** — prevents accidental ownership transfer
+- **UUPS upgradeable** — implementation can be upgraded by owner
 
 ## Key Events
 
-| Event                        | Description                           |
-| ---------------------------- | ------------------------------------- |
-| `DepositExecuted`            | Same-chain deposit completed          |
-| `CrossChainDepositExecuted`  | Cross-chain deposit completed         |
-| `DepositIntentCreated`       | Intent recorded on-chain              |
-| `DepositIntentCancelled`     | User cancelled an intent              |
-| `FeeCollected`               | Fee transferred to collector          |
-| `ReferralFeeCollected`       | Referral fee paid out                 |
-| `DepositRequestSubmitted`    | Async deposit queued (request vaults) |
-
-## View Functions
-
-| Function                  | Description                                 |
-| ------------------------- | ------------------------------------------- |
-| `getNonce(user)`          | Current nonce for a user                    |
-| `getDeposit(intentHash)`  | Full deposit record                         |
-| `isIntentValid(intentHash)` | Whether an intent can still be executed   |
-| `verifyIntent(intent, sig)` | Verify an EIP-712 signature              |
-| `getUsdValue(asset, amount)` | Get USD value via oracle                |
-| `getReferralEarnings(referrer, asset)` | Track referral fee earnings   |
+| Event                  | Description                           |
+| ---------------------- | ------------------------------------- |
+| `Routed`               | Deposit completed with attribution    |
+| `DepositRequestRouted` | Async deposit queued with attribution |
+| `VaultAdapterUpdated`  | New adapter registered for a vault    |

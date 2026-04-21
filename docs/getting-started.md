@@ -5,7 +5,7 @@ description: "Auth, request format, and a full integration walkthrough"
 
 ## Authentication
 
-The Yieldo API is currently **open and does not require authentication**. Rate limits may apply.
+The Yieldo API is currently **open and does not require authentication** for public endpoints. Wallet partners can use API keys for attribution tracking.
 
 ## Base URL
 
@@ -46,7 +46,7 @@ Returns `{"status": "ok"}` when the API is running.
 Fetch the list of available vaults. Optionally filter by chain or asset.
 
 ```bash
-GET /v1/vaults?chain_id=8453&asset=usdc
+GET /v1/vaults?chain_id=8453
 ```
 
 ### Step 2: Get Source Tokens
@@ -67,18 +67,16 @@ POST /v1/quote
   "from_chain_id": 42161,
   "from_token": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
   "from_amount": "1000000000",
-  "vault_id": "base-steakhouse-prime-usdc",
+  "vault_id": "8453:0xbeefe94c8ad530842bfe7d8b397938ffc1cb83b2",
   "user_address": "0x..."
 }
 ```
 
 The response includes:
 
-* **estimate** - Expected output amounts, fees, and estimated shares
-* **intent** - The `DepositIntent` data
-* **signature** - Pre-signed EIP-712 signature (ready to use, no wallet signing needed)
-* **eip712** - Full EIP-712 typed data (for reference)
+* **estimate** - Expected output amounts and estimated shares
 * **approval** - Token approval details (if needed)
+* **route_options** - Available bridge routes for cross-chain deposits
 
 ### Step 4: Token Approval
 
@@ -86,7 +84,7 @@ If the response includes an `approval` object, the user must approve the specifi
 
 ### Step 5: Build the Transaction
 
-Submit the signature and intent data from the quote response to build the final transaction.
+Submit the vault and amount details to get the final transaction.
 
 ```bash
 POST /v1/quote/build
@@ -94,13 +92,8 @@ POST /v1/quote/build
   "from_chain_id": 42161,
   "from_token": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
   "from_amount": "1000000000",
-  "vault_id": "base-steakhouse-prime-usdc",
-  "user_address": "0x...",
-  "signature": "<signature from quote response>",
-  "intent_amount": "997000000",
-  "nonce": "0",
-  "deadline": "1711900000",
-  "fee_bps": "10"
+  "vault_id": "8453:0xbeefe94c8ad530842bfe7d8b397938ffc1cb83b2",
+  "user_address": "0x..."
 }
 ```
 

@@ -51,7 +51,7 @@ LiFi could not find a swap/bridge path. Common causes:
 { "detail": "LiFi returned zero output amount" }
 ```
 
-The input amount is too small to produce any output after fees and slippage.
+The input amount is too small to produce any output after slippage.
 
 **Fix:** Increase the deposit amount.
 
@@ -71,9 +71,7 @@ The selected bridge doesn't support destination-chain contract calls, which are 
 { "detail": "No deposit router on chain {chain_id}" }
 ```
 
-The specified chain doesn't have a deposit router deployed. Deposit routers are currently deployed on:
-- Ethereum (chain ID: 1)
-- Base (chain ID: 8453)
+The specified chain doesn't have a deposit router deployed. See the [contract addresses](/guides/deposit-router-contracts#contract-addresses) for deployed chains.
 
 ### Validation Error (422)
 
@@ -94,7 +92,6 @@ A required field is missing or has an invalid type. Check the request body again
 ## Best Practices
 
 1. **Always check for `approval`** - It can be `null` for native token deposits
-2. **Never recompute signed values** - Use the exact `intent_amount`, `nonce`, and `deadline` from the quote response when building
-3. **Handle quote expiry** - Quotes can become stale. If the build fails, fetch a new quote
-4. **Poll with backoff** - For status checks, start at 15s intervals. Don't poll faster than every 10 seconds
-5. **Show the LiFi explorer link** - Give users `tracking.lifi_explorer` so they can independently track their bridge transfer
+2. **Handle quote expiry** - Quotes can become stale. If the build fails, fetch a new quote
+3. **Poll with backoff** - For status checks, start at 15s intervals. Don't poll faster than every 10 seconds
+4. **Show the LiFi explorer link** - Give users `tracking.lifi_explorer` so they can independently track their bridge transfer

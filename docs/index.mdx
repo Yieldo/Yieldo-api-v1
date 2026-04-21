@@ -3,7 +3,7 @@ title: "Introduction"
 description: "Cross-chain deposit aggregator for ERC-4626 and custom yield vaults"
 ---
 
-Yieldo is a cross-chain deposit aggregator that lets users deposit into yield vaults from any supported chain and token. The API supports **ERC-4626 vaults** and **custom vault integrations** across multiple protocols. It handles routing, bridging, and vault deposits in a single flow using an intent-based architecture.
+Yieldo is a cross-chain deposit aggregator that lets users deposit into yield vaults from any supported chain and token. The API handles routing, bridging, and vault deposits with no fees to the user. An on-chain attribution system tracks deposits for revenue share with vault partners.
 
 ## Base URL
 
@@ -14,19 +14,25 @@ https://api.yieldo.xyz
 ## How It Works
 
 1. **Browse vaults** - Query available vaults across chains and protocols
-2. **Get a quote** - Submit your source chain, token, and amount to receive a deposit quote with a pre-signed intent
+2. **Get a quote** - Submit your source chain, token, and amount to get a deposit quote with route options
 3. **Build the transaction** - Submit the quote data to get a ready-to-send transaction
 4. **Send & track** - Send the transaction and monitor the deposit progress
 
 ## Key Concepts
 
-### Intent-Based Deposits
+### Attribution-Only Router
 
-Yieldo uses an intent-based system with EIP-712 signed `DepositIntent` messages. When you request a quote, the API returns a pre-signed intent and signature — no wallet signing is required from the user. The intent authorizes the deposit router contract to deposit funds into a vault on the user's behalf. Each intent includes a deadline and nonce for replay protection.
+Yieldo's deposit router is non-custodial — it pulls tokens from the user, deposits them into the vault, and emits a `Routed` event for on-chain attribution. No fees are deducted. 100% of the user's deposit goes into the vault.
+
+Each deposit carries a `partnerId` and `partnerType` for attribution — identifying which wallet, KOL, or integration referred the user. This is used for revenue share tracking with vault partners.
 
 ### Cross-Chain Routing
 
-For cross-chain deposits, Yieldo uses [LiFi](https://li.fi/) to bridge and swap tokens. The API finds the optimal route, handles slippage calculations, and builds the final transaction that bridges + deposits in a single step.
+For cross-chain deposits, Yieldo uses [LiFi](https://li.fi/) to bridge and swap tokens. Users can choose from multiple bridge routes (like Jumper.exchange), with the best route auto-selected.
+
+### Vault Adapter Pattern
+
+The router supports any vault type through a pluggable adapter system. Standard ERC-4626 vaults work out of the box. Custom vaults (Midas, Veda, Lido, etc.) use adapters that can be deployed without upgrading the router contract.
 
 ### Supported Chains
 
@@ -36,27 +42,21 @@ For cross-chain deposits, Yieldo uses [LiFi](https://li.fi/) to bridge and swap 
 | Base        | 8453     | Source + Vaults    |
 | Arbitrum    | 42161    | Source + Vaults    |
 | Optimism    | 10       | Source + Vaults    |
+| Monad       | 143      | Source + Vaults    |
+| Katana      | 747474   | Source + Vaults    |
 | Avalanche   | 43114    | Source only        |
 | BSC         | 56       | Source only        |
 
 ### Supported Vault Types
 
-Yieldo supports a variety of vault standards and protocols:
-
 | Type     | Description                          | Examples                                      |
 | -------- | ------------------------------------ | --------------------------------------------- |
 | ERC-4626 | Standard tokenized vault interface   | Steakhouse USDC, Gauntlet WETH Prime, Moonwell Flagship USDC |
-| Custom   | Protocol-specific vault integrations | Veda Liquid ETH, Midas mTBILL, Spark USDC Vault |
+| Custom   | Protocol-specific via adapters       | Midas mTBILL, Veda Liquid ETH, Lido Earn, IPOR |
 
-Vaults span multiple protocols and curators including Steakhouse, Gauntlet, Moonwell, Midas, Veda, Upshift, MEV Capital, and more. Use `GET /v1/vaults` to see the full list.
+### Revenue Model
 
-### Revenue Share
-
-Yieldo has agreements with curators and vault platforms to share revenue with wallets and distributors. **100% of curator revenue share is passed to the distributor.**
-
-On top of that, there's a flat **10 bps (0.1%)** fee on the deposit amount, deducted before the vault deposit. **50% of this fee goes to the wallet/distributor.**
-
-Individual campaigns to further incentivize deposits directly from wallets are coming soon.
+Yieldo charges **no fees to users**. Revenue comes from revenue share agreements with vault curators and protocols. Every deposit routed through Yieldo is attributed on-chain via the `Routed` event, providing provable attribution for invoicing.
 
 ## Quick Example
 
@@ -71,23 +71,18 @@ curl -X POST https://api.yieldo.xyz/v1/quote \
     "from_chain_id": 42161,
     "from_token": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
     "from_amount": "1000000000",
-    "vault_id": "base-steakhouse-prime-usdc",
+    "vault_id": "8453:0xbeefe94c8ad530842bfe7d8b397938ffc1cb83b2",
     "user_address": "0xYourAddress"
   }'
 
-# 3. Build the transaction using the signature from the quote response
+# 3. Build the transaction
 curl -X POST https://api.yieldo.xyz/v1/quote/build \
   -H "Content-Type: application/json" \
   -d '{
     "from_chain_id": 42161,
     "from_token": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
     "from_amount": "1000000000",
-    "vault_id": "base-steakhouse-prime-usdc",
-    "user_address": "0xYourAddress",
-    "signature": "<signature from quote response>",
-    "intent_amount": "997000000",
-    "nonce": "0",
-    "deadline": "1711900000",
-    "fee_bps": "10"
+    "vault_id": "8453:0xbeefe94c8ad530842bfe7d8b397938ffc1cb83b2",
+    "user_address": "0xYourAddress"
   }'
 ```

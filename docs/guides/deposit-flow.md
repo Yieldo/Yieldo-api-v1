@@ -11,12 +11,14 @@ This guide walks through the complete deposit flow for integrating Yieldo into a
 User selects vault → Get quote → Approve token → Build tx → Send tx → Track status
 ```
 
+No wallet signature is required — the user only signs the approval and deposit transactions.
+
 ## Step 1: Select a Vault
 
 Fetch available vaults and let the user choose one.
 
 ```javascript
-const response = await fetch('https://api.yieldo.xyz/v1/vaults?chain_id=8453');
+const response = await fetch('https://api.yieldo.xyz/v1/vaults');
 const vaults = await response.json();
 ```
 
@@ -31,8 +33,8 @@ const quote = await fetch('https://api.yieldo.xyz/v1/quote', {
   body: JSON.stringify({
     from_chain_id: 42161,
     from_token: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-    from_amount: '1000000000', // 1000 USDC
-    vault_id: 'base-steakhouse-prime-usdc',
+    from_amount: '1000000000',
+    vault_id: '8453:0xbeefe94c8ad530842bfe7d8b397938ffc1cb83b2',
     user_address: userAddress,
   }),
 });
@@ -40,11 +42,9 @@ const quoteData = await quote.json();
 ```
 
 The response contains:
-- **`estimate`** - Shows the expected output, fees, and estimated shares
-- **`intent`** - The deposit intent data
-- **`signature`** - Pre-signed EIP-712 signature (ready to use)
-- **`eip712`** - The typed data (for reference)
+- **`estimate`** - Expected output amount, estimated shares, gas cost
 - **`approval`** - Token approval details (if needed)
+- **`route_options`** - Available bridge routes for cross-chain deposits (with bridge name, logo, estimated time, gas cost)
 
 ## Step 3: Approve Token Spending
 
@@ -66,7 +66,7 @@ if (quoteData.approval) {
 
 ## Step 4: Build the Transaction
 
-Submit the signature and intent data from the quote response to get the final transaction. No wallet signing is needed — the quote response includes a pre-signed signature.
+Submit the deposit details to get the final transaction. Optionally pass a `preferred_bridge` if the user selected a specific route.
 
 ```javascript
 const buildResponse = await fetch('https://api.yieldo.xyz/v1/quote/build', {
@@ -76,13 +76,11 @@ const buildResponse = await fetch('https://api.yieldo.xyz/v1/quote/build', {
     from_chain_id: 42161,
     from_token: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
     from_amount: '1000000000',
-    vault_id: 'base-steakhouse-prime-usdc',
+    vault_id: '8453:0xbeefe94c8ad530842bfe7d8b397938ffc1cb83b2',
     user_address: userAddress,
-    signature: quoteData.signature,
-    intent_amount: quoteData.intent.amount,
-    nonce: quoteData.intent.nonce,
-    deadline: quoteData.intent.deadline,
-    fee_bps: quoteData.intent.fee_bps,
+    preferred_bridge: 'across', // optional: user's selected route
+    partner_id: 'my-app',       // optional: for attribution
+    partner_type: 2,            // 0=direct, 1=kol, 2=wallet
   }),
 });
 const buildData = await buildResponse.json();
@@ -124,7 +122,6 @@ async function pollStatus(txHash, fromChainId, toChainId) {
       throw new Error('Transfer failed');
     }
 
-    // Poll every 15 seconds
     await new Promise(r => setTimeout(r, 15000));
   }
 }
@@ -134,7 +131,7 @@ async function pollStatus(txHash, fromChainId, toChainId) {
 
 ```javascript
 async function deposit(vaultId, fromChainId, fromToken, amount, userAddress) {
-  // 1. Get quote (includes pre-signed signature)
+  // 1. Get quote
   const quote = await getQuote(fromChainId, fromToken, amount, vaultId, userAddress);
 
   // 2. Approve if needed
@@ -142,14 +139,9 @@ async function deposit(vaultId, fromChainId, fromToken, amount, userAddress) {
     await approveToken(quote.approval);
   }
 
-  // 3. Build transaction (no wallet signing needed)
+  // 3. Build transaction
   const build = await buildTransaction({
     fromChainId, fromToken, amount, vaultId, userAddress,
-    signature: quote.signature,
-    intentAmount: quote.intent.amount,
-    nonce: quote.intent.nonce,
-    deadline: quote.intent.deadline,
-    feeBps: quote.intent.fee_bps,
   });
 
   // 4. Send transaction

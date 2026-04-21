@@ -1,11 +1,11 @@
 ---
 title: "Quote & Build"
-description: "Get a deposit quote with a pre-signed intent, then build the transaction"
+description: "Get a deposit quote with route options, then build the transaction"
 ---
 
 ## Get Quote
 
-Returns a deposit quote with the estimated output, fees, a pre-signed intent, and a ready-to-use signature.
+Returns a deposit quote with estimated output, route options for cross-chain deposits, and approval details.
 
 ```
 POST /v1/quote
@@ -32,7 +32,7 @@ curl -X POST https://api.yieldo.xyz/v1/quote \
     "from_chain_id": 42161,
     "from_token": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
     "from_amount": "1000000000",
-    "vault_id": "base-steakhouse-prime-usdc",
+    "vault_id": "8453:0xbeefe94c8ad530842bfe7d8b397938ffc1cb83b2",
     "user_address": "0xYourAddress"
   }'
 ```
@@ -43,83 +43,58 @@ curl -X POST https://api.yieldo.xyz/v1/quote \
 {
   "quote_type": "cross_chain",
   "vault": {
-    "vault_id": "base-steakhouse-prime-usdc",
+    "vault_id": "8453:0xbeefe94c8ad530842bfe7d8b397938ffc1cb83b2",
     "name": "Steakhouse Prime USDC",
     "address": "0xBEEFE94c8aD530842bfE7d8B397938fFc1cb83b2",
     "chain_id": 8453,
     "chain_name": "Base",
-    "asset": { "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "symbol": "USDC", "decimals": 6 },
+    "asset": { "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "symbol": "usdc", "decimals": 6 },
     "deposit_router": "0xF6B7723661d52E8533c77479d3cad534B4D147Aa",
-    "type": "erc4626"
+    "type": "morpho"
   },
   "estimate": {
     "from_amount": "1000000000",
     "from_amount_usd": "1000.00",
     "to_amount": "999500000",
     "to_amount_min": "969515000",
-    "deposit_amount": "999400050",
-    "fee_amount": "99950",
-    "fee_bps": 10,
+    "deposit_amount": "999500000",
     "estimated_shares": "986000000",
     "price_impact": 0.001,
     "estimated_time": 120,
     "gas_cost_usd": "0.50",
     "steps": [
-      {
-        "type": "swap",
-        "tool": "1inch",
-        "from_token": "USDC",
-        "to_token": "USDC",
-        "from_amount": "1000000000",
-        "to_amount": "999500000",
-        "estimated_time": 30
-      }
+      { "type": "cross", "tool": "Stargate", "estimated_time": 120 }
     ]
-  },
-  "intent": {
-    "user": "0xYourAddress",
-    "vault": "0xBEEFE94c8aD530842bfE7d8B397938fFc1cb83b2",
-    "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-    "amount": "969515000",
-    "nonce": "0",
-    "deadline": "1711900000",
-    "fee_bps": "10"
-  },
-  "signature": "0x...",
-  "eip712": {
-    "domain": {
-      "name": "DepositRouter",
-      "version": "1",
-      "chainId": 8453,
-      "verifyingContract": "0xF6B7723661d52E8533c77479d3cad534B4D147Aa"
-    },
-    "types": {
-      "DepositIntent": [
-        { "name": "user", "type": "address" },
-        { "name": "vault", "type": "address" },
-        { "name": "asset", "type": "address" },
-        { "name": "amount", "type": "uint256" },
-        { "name": "nonce", "type": "uint256" },
-        { "name": "deadline", "type": "uint256" },
-        { "name": "feeBps", "type": "uint256" }
-      ]
-    },
-    "primaryType": "DepositIntent",
-    "message": {
-      "user": "0xYourAddress",
-      "vault": "0xBEEFE94c8aD530842bfE7d8B397938fFc1cb83b2",
-      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-      "amount": "969515000",
-      "nonce": "0",
-      "deadline": "1711900000",
-      "fee_bps": "10"
-    }
   },
   "approval": {
     "token_address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-    "spender_address": "0xF6B7723661d52E8533c77479d3cad534B4D147Aa",
+    "spender_address": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
     "amount": "1000000000"
-  }
+  },
+  "route_options": [
+    {
+      "bridge": "stargate",
+      "bridge_name": "Stargate",
+      "bridge_logo": "https://...",
+      "to_amount": "999500000",
+      "to_amount_min": "969515000",
+      "deposit_amount": "999500000",
+      "estimated_time": 120,
+      "gas_cost_usd": "0.50",
+      "tags": ["RECOMMENDED", "CHEAPEST"]
+    },
+    {
+      "bridge": "across",
+      "bridge_name": "Across",
+      "bridge_logo": "https://...",
+      "to_amount": "998200000",
+      "to_amount_min": "968254000",
+      "deposit_amount": "998200000",
+      "estimated_time": 5,
+      "gas_cost_usd": "0.30",
+      "tags": ["FASTEST"]
+    }
+  ]
 }
 ```
 
@@ -127,9 +102,9 @@ curl -X POST https://api.yieldo.xyz/v1/quote \
 
 | Type               | Description                                                    |
 | ------------------ | -------------------------------------------------------------- |
-| `direct`           | Same chain, same token as the vault asset - no swap needed     |
-| `same_chain_swap`  | Same chain, different token - swap via LiFi then deposit       |
-| `cross_chain`      | Different chain - bridge + swap via LiFi then deposit          |
+| `direct`           | Same chain, same token as the vault asset — no swap needed     |
+| `same_chain_swap`  | Same chain, different token — swap via LiFi then deposit       |
+| `cross_chain`      | Different chain — bridge + swap via LiFi then deposit          |
 
 ### Estimate Fields
 
@@ -139,31 +114,24 @@ curl -X POST https://api.yieldo.xyz/v1/quote \
 | `from_amount_usd`  | string/null | USD value of input                             |
 | `to_amount`        | string      | Expected output in vault asset                 |
 | `to_amount_min`    | string      | Minimum output after slippage                  |
-| `deposit_amount`   | string      | Amount deposited into vault (after fee)        |
-| `fee_amount`       | string      | Fee deducted from deposit                      |
-| `fee_bps`          | int         | Fee in basis points                            |
+| `deposit_amount`   | string      | Amount deposited into vault (= to_amount, no fee) |
 | `estimated_shares` | string/null | Estimated vault shares received                |
 | `price_impact`     | float/null  | Price impact of the swap                       |
 | `estimated_time`   | int/null    | Estimated time in seconds                      |
 | `gas_cost_usd`     | string/null | Estimated gas cost in USD                      |
 | `steps`            | array/null  | Breakdown of swap/bridge steps                 |
 
-### Approval
+### Route Options
 
-If `approval` is present (not null), the user must approve the `spender_address` to spend `amount` of `token_address` before sending the transaction. For native token deposits (ETH), `approval` will be `null`.
+For cross-chain deposits, `route_options` lists available bridge routes. Each route shows the bridge name, logo, output amount, estimated time, gas cost, and tags (`RECOMMENDED`, `CHEAPEST`, `FASTEST`).
 
-### Errors
-
-| Status | Description                                     |
-| ------ | ----------------------------------------------- |
-| 400    | No route found or zero output amount            |
-| 404    | Vault not found                                 |
+Pass the selected route's `bridge` key as `preferred_bridge` when building the transaction.
 
 ---
 
 ## Build Transaction
 
-Submit the signature from the quote response to get a ready-to-send transaction.
+Build a ready-to-send transaction for the deposit.
 
 ```
 POST /v1/quote/build
@@ -171,22 +139,18 @@ POST /v1/quote/build
 
 ### Request Body
 
-| Field           | Type   | Required | Default                                      | Description                                |
-| --------------- | ------ | -------- | -------------------------------------------- | ------------------------------------------ |
-| `from_chain_id` | int    | Yes      |                                              | Source chain ID                             |
-| `from_token`    | string | Yes      |                                              | Source token address                        |
-| `from_amount`   | string | Yes      |                                              | Amount in raw token units                   |
-| `vault_id`      | string | Yes      |                                              | Target vault ID                             |
-| `user_address`  | string | Yes      |                                              | User's wallet address                       |
-| `signature`     | string | Yes      |                                              | The `signature` from the quote response     |
-| `intent_amount` | string | Yes      |                                              | The `amount` from the quote intent          |
-| `nonce`         | string | Yes      |                                              | The `nonce` from the quote intent           |
-| `deadline`      | string | Yes      |                                              | The `deadline` from the quote intent        |
-| `fee_bps`       | string | Yes      |                                              | The `fee_bps` from the quote intent         |
-| `slippage`      | float  | No       | `0.03`                                       | Slippage tolerance                          |
-| `referrer`      | string | No       | `0x0000000000000000000000000000000000000000`  | Referrer address                            |
-
-> **Important:** The `signature`, `intent_amount`, `nonce`, `deadline`, and `fee_bps` must match the exact values from the quote response. Do not recompute these.
+| Field              | Type   | Required | Default                                      | Description                                |
+| ------------------ | ------ | -------- | -------------------------------------------- | ------------------------------------------ |
+| `from_chain_id`    | int    | Yes      |                                              | Source chain ID                             |
+| `from_token`       | string | Yes      |                                              | Source token address                        |
+| `from_amount`      | string | Yes      |                                              | Amount in raw token units                   |
+| `vault_id`         | string | Yes      |                                              | Target vault ID                             |
+| `user_address`     | string | Yes      |                                              | User's wallet address                       |
+| `slippage`         | float  | No       | `0.03`                                       | Slippage tolerance                          |
+| `referrer`         | string | No       | `0x0000...`                                  | Referrer address                            |
+| `preferred_bridge` | string | No       |                                              | Bridge key from route_options               |
+| `partner_id`       | string | No       | `""`                                         | Attribution: partner slug or handle         |
+| `partner_type`     | int    | No       | `0`                                          | 0=direct, 1=kol, 2=wallet                  |
 
 ### Example Request
 
@@ -197,13 +161,9 @@ curl -X POST https://api.yieldo.xyz/v1/quote/build \
     "from_chain_id": 42161,
     "from_token": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
     "from_amount": "1000000000",
-    "vault_id": "base-steakhouse-prime-usdc",
+    "vault_id": "8453:0xbeefe94c8ad530842bfe7d8b397938ffc1cb83b2",
     "user_address": "0xYourAddress",
-    "signature": "<signature from quote response>",
-    "intent_amount": "969515000",
-    "nonce": "0",
-    "deadline": "1711900000",
-    "fee_bps": "10"
+    "preferred_bridge": "stargate"
   }'
 ```
 
@@ -212,7 +172,7 @@ curl -X POST https://api.yieldo.xyz/v1/quote/build \
 ```json
 {
   "transaction_request": {
-    "to": "0xF6B7723661d52E8533c77479d3cad534B4D147Aa",
+    "to": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
     "data": "0x...",
     "value": "0",
     "chain_id": 42161,
@@ -220,17 +180,8 @@ curl -X POST https://api.yieldo.xyz/v1/quote/build \
   },
   "approval": {
     "token_address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-    "spender_address": "0xF6B7723661d52E8533c77479d3cad534B4D147Aa",
+    "spender_address": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
     "amount": "1000000000"
-  },
-  "intent": {
-    "user": "0xYourAddress",
-    "vault": "0xBEEFE94c8aD530842bfE7d8B397938fFc1cb83b2",
-    "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-    "amount": "969515000",
-    "nonce": "0",
-    "deadline": "1711900000",
-    "fee_bps": "10"
   },
   "tracking": {
     "from_chain_id": 42161,
@@ -256,5 +207,5 @@ curl -X POST https://api.yieldo.xyz/v1/quote/build \
 
 | Status | Description                                          |
 | ------ | ---------------------------------------------------- |
-| 400    | No route found or contract calls quote unavailable   |
+| 400    | No route found or build failed                       |
 | 404    | Vault not found                                      |

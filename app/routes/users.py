@@ -84,6 +84,18 @@ async def get_me(request: Request):
     }
 
 
+@router.get("/role/{address}")
+async def get_role(address: str):
+    addr = address.lower()
+    kol = await database.get_kol_by_address(addr)
+    if kol and kol.get("status") == "active":
+        return {"role": "kol", "handle": kol.get("handle", "")}
+    partner = await database.get_partner_by_address(addr)
+    if partner and partner.get("status") == "active":
+        return {"role": "wallet", "name": partner.get("name", "")}
+    return {"role": "user"}
+
+
 @router.post("/logout")
 async def logout(request: Request):
     auth = request.headers.get("Authorization", "")

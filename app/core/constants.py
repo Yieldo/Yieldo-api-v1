@@ -93,6 +93,12 @@ ASSET_TOKEN_CONFIG: dict[int, dict[str, tuple[str, int]]] = {
     10: {
         "usdc": ("0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85", 6),
     },
+    999: {
+        "usdt": ("0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb", 6),  # USDT0
+        "whype": ("0x5555555555555555555555555555555555555555", 18),  # WHYPE
+        "usdc": ("0xb88339CB7199b77E23DB6E890353E22632Ba630f", 6),  # Circle USDC
+        "ubtc": ("0x9FDBdA0A5e284c32744D2f17Ee5c74B284993463", 8),  # uBTC (commonly used on HyperEVM)
+    },
 }
 
 

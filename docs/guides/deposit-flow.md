@@ -11,7 +11,7 @@ This guide walks through the complete deposit flow for integrating Yieldo into a
 User selects vault → Get quote → Approve token → Build tx → Send tx → Track status
 ```
 
-No wallet signature is required — the user only signs the approval and deposit transactions.
+The user only signs the approval (for ERC-20 deposits) and the deposit transaction itself. V3.1.0 does not require any EIP-712 intent signature — deposits are direct `depositFor` calls.
 
 ## Step 1: Select a Vault
 

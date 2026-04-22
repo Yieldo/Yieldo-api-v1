@@ -1,28 +1,46 @@
 ---
 title: "Cross-Chain Deposits"
-description: "How cross-chain deposits work - bridging, slippage, and tracking"
+description: "How cross-chain deposits work — bridging, vault dispatch, and tracking"
 ---
 
 This guide covers the specifics of cross-chain deposits, where the user's tokens originate on a different chain than the target vault.
 
 ## How It Works
 
-When a user deposits from a different chain (e.g., Arbitrum USDC into a Base vault), the flow is:
+When a user deposits from a different chain (e.g., Arbitrum USDC into a Base vault), Yieldo offers two flows depending on the target vault type:
+
+### Single-Step (LiFi Composer)
+
+Used for Morpho and other standard ERC-4626 vaults.
 
 ```
-Source Chain                          Destination Chain
-┌──────────────┐                     ┌──────────────────┐
-│ User's USDC  │ ──── Bridge ─────▶  │ Deposit Router   │
-│ (Arbitrum)   │   (via LiFi)        │ (Base)           │
-└──────────────┘                     │   ↓              │
-                                     │ Yield Vault      │
-                                     │ (shares → user)  │
-                                     └──────────────────┘
+Source Chain                               Destination Chain
+┌──────────────┐                          ┌──────────────────────────────┐
+│ User's USDC  │ ── bridge (LiFi) ────▶   │ LiFi Executor receives USDC  │
+│ (Arbitrum)   │                          │   ↓                          │
+└──────────────┘                          │ router.depositFor(..., user) │
+                                          │   ↓                          │
+                                          │ Vault mints shares to user   │
+                                          └──────────────────────────────┘
 ```
 
-1. **LiFi finds the optimal route** - swap + bridge in one or more steps
-2. **The API builds a contract-call transaction** - bridges tokens and calls the deposit router on the destination chain
-3. **The deposit router executes the intent** - deposits into the vault and mints shares to the user
+LiFi's Executor is on the router's `authorizedCallers` whitelist (V3.1.0), so it can pass `user=<user>` instead of `msg.sender`. No user signature beyond the bridge tx.
+
+### Two-Step
+
+Used for vault types LiFi Composer doesn't natively understand (Midas, Veda, Custom, IPOR, Lido).
+
+```
+Step 1 (source):   User sends bridge tx
+                   → tokens arrive at user's wallet on destination
+Step 2 (dest):     User approves + calls router.depositFor(...) themselves
+                   → msg.sender == user, so no whitelist needed
+                   → shares land in user's wallet
+```
+
+Step 2 is a normal same-chain deposit signed by the user. Tokens are always safe in between — they sit in the user's own wallet.
+
+The build response signals the flow via `two_step: true|false`. See the [Deposit Flow guide](/guides/deposit-flow) for code examples of each.
 
 ## Quote Types
 
@@ -38,17 +56,16 @@ The API returns a `quote_type` field that tells you what kind of deposit this is
 
 Cross-chain deposits have additional slippage considerations:
 
-- **User-specified slippage** (`slippage` parameter, default 3%) - applied to the LiFi swap/bridge
-- **Cross-chain slippage buffer** - the API applies an additional 1% buffer on the intent amount to account for bridge slippage variability
-- **Intent amount** - the signed intent uses the buffered minimum amount, so the deposit router will accept anything above that threshold
+- **User-specified slippage** (`slippage` parameter, default 3%) — applied to the LiFi swap/bridge.
+- **Cross-chain slippage buffer** — the API applies an extra ~1% buffer on the amount that will arrive on the destination, so the deposit succeeds even if the bridge slippage lands a hair below quoted.
+- **Router-level `minSharesOut`** — V3.1.0 supports an 8-arg `depositFor` with an on-chain share floor. The API currently emits the 7-arg compat form (`minSharesOut=0`) during the rollout window and will switch to the 8-arg form with a computed floor in a follow-up release.
 
 ```
 from_amount: 1000 USDC
   → LiFi quote: ~999.5 USDC received on destination
-  → min after slippage: 969.5 USDC
-  → intent amount (with buffer): 959.8 USDC
-  → fee deducted from actual received amount
-  → remainder deposited into vault
+  → min after 3% slippage: 969.5 USDC
+  → buffered deposit amount: ~959.8 USDC
+  → remainder deposited into the vault by the router
 ```
 
 ## Bridging
@@ -76,35 +93,37 @@ NOT_FOUND → PENDING → DONE
                     → FAILED
 ```
 
-- **`NOT_FOUND`** - Transaction not yet indexed by LiFi (normal for first few seconds)
-- **`PENDING`** - Bridge transfer in progress
-- **`DONE`** - Tokens received on destination chain
-- **`FAILED`** - Something went wrong
+- **`NOT_FOUND`** — Transaction not yet indexed by LiFi (normal for first few seconds)
+- **`PENDING`** — Bridge transfer in progress
+- **`DONE`** — Tokens received on destination chain
+- **`FAILED`** — Something went wrong
 
 ### Recommended Polling Interval
 
-Poll every **15 seconds**. Most transfers complete within 2-5 minutes.
+Poll every **15 seconds**. Most transfers complete within 2–5 minutes.
 
-## Verifying On-Chain
+## Verifying the Deposit On-Chain
 
-After a cross-chain transfer completes, you can verify the deposit intent was executed:
+Once the bridge is `DONE`:
 
-```bash
-GET /v1/intent-status?intent_hash=0x...&chain_id=8453
-```
+- **Single-step** — the same LiFi tx on the destination emits the router's `Routed(partnerId, partnerType, user, vault, asset, amount, shares)` event. Indexers can read `shares` directly from the event (V3.1.0).
+- **Two-step** — the user's own step-2 tx emits `Routed(...)` on the destination chain.
 
-The `executed` field confirms whether the vault deposit was successful.
+The `/v1/deposits` and `/v1/positions` endpoints consume this event for attribution and position display.
 
 ## Source Chain Support
 
-| Chain     | Chain ID | Tokens Available                           |
-| --------- | -------- | ------------------------------------------ |
+| Chain     | Chain ID | Tokens Available                          |
+| --------- | -------- | ----------------------------------------- |
 | Ethereum  | 1        | USDC, USDT, WETH, WBTC, DAI, and more     |
-| Base      | 8453     | USDC, WETH, and more                       |
+| Base      | 8453     | USDC, WETH, and more                      |
 | Arbitrum  | 42161    | USDC, USDT, WETH, and more                |
-| Optimism  | 10       | USDC, WETH, and more                       |
-| Avalanche | 43114    | AVAX, USDC, and more                       |
-| BSC       | 56       | BNB, USDC, and more                        |
+| Optimism  | 10       | USDC, WETH, and more                      |
+| Monad     | 143      | USDC, WETH, and more                      |
+| HyperEVM  | 999      | USDT0, WHYPE, USDC, uBTC, and more        |
+| Katana    | 747474   | USDC, WETH, and more                      |
+| Avalanche | 43114    | AVAX, USDC, and more                      |
+| BSC       | 56       | BNB, USDC, and more                       |
 
 Use `GET /v1/tokens?chain_id={id}` to get the exact list of tokens for each chain.
 
@@ -112,7 +131,8 @@ Use `GET /v1/tokens?chain_id={id}` to get the exact list of tokens for each chai
 
 | Error                                      | Cause                                    | Resolution                                    |
 | ------------------------------------------ | ---------------------------------------- | --------------------------------------------- |
-| "No route found"                           | LiFi can't find a bridge/swap path       | Try a different source token or larger amount  |
-| "LiFi contract calls quote unavailable"    | Bridge doesn't support contract calls    | Use a different source chain                   |
-| "Zero output amount"                       | Amount too small after fees/slippage     | Increase the deposit amount                    |
-| Transfer stuck in `PENDING`                | Bridge congestion or delays              | Wait and keep polling; bridges can be slow     |
+| "No route found"                           | LiFi can't find a bridge/swap path       | Try a different source token or larger amount |
+| "LiFi contract calls quote unavailable"    | Bridge doesn't support contract calls    | Use a different source chain                  |
+| "Zero output amount"                       | Amount too small after fees/slippage     | Increase the deposit amount                   |
+| "Unauthorized caller" (on-chain revert)    | LiFi Executor not whitelisted on router  | Chain not yet on V3.1.0 — report to Yieldo    |
+| Transfer stuck in `PENDING`                | Bridge congestion or delays              | Wait and keep polling; bridges can be slow    |

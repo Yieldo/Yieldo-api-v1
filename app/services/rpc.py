@@ -101,11 +101,14 @@ def encode_deposit_for_calldata(
     partner_id: bytes,
     partner_type: int,
     is_erc4626: bool,
+    min_shares_out: int | None = None,
 ) -> str:
+    """Build depositFor calldata. V3.1.0+ accepts an 8-arg variant with minSharesOut slippage
+    protection; V3.0.0 only accepts the 7-arg variant. Pass None (default) to use the 7-arg form
+    for backward compatibility; pass an int (including 0) to use the 8-arg form."""
     router = get_deposit_router(chain_id)
-    return router.encode_abi(
-        abi_element_identifier="depositFor",
-        args=[
+    if min_shares_out is None:
+        args = [
             Web3.to_checksum_address(vault),
             Web3.to_checksum_address(asset),
             amount,
@@ -113,8 +116,19 @@ def encode_deposit_for_calldata(
             partner_id,
             partner_type,
             is_erc4626,
-        ],
-    )
+        ]
+    else:
+        args = [
+            Web3.to_checksum_address(vault),
+            Web3.to_checksum_address(asset),
+            amount,
+            Web3.to_checksum_address(user),
+            partner_id,
+            partner_type,
+            is_erc4626,
+            min_shares_out,
+        ]
+    return router.encode_abi(abi_element_identifier="depositFor", args=args)
 
 
 def encode_deposit_request_for_calldata(

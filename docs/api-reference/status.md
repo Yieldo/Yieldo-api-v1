@@ -1,11 +1,11 @@
 ---
 title: "Status & Tracking"
-description: "Track cross-chain transfers and on-chain intent status"
+description: "Track cross-chain transfer progress"
 ---
 
 ## Get Transfer Status
 
-Track the progress of a cross-chain deposit by its source transaction hash.
+Track the progress of a cross-chain deposit by its source transaction hash. Backed by LiFi's transfer tracker.
 
 ```
 GET /v1/status
@@ -74,65 +74,20 @@ curl "https://api.yieldo.xyz/v1/status?tx_hash=0xabc...&from_chain_id=42161&to_c
 | ------ | ------------------------ |
 | 404    | Transaction not found    |
 
----
+## Verifying the Deposit On-Chain
 
-## Get Intent Status
+V3.1.0 of the Yieldo router no longer uses signed deposit intents. Once the bridge is `DONE`, the deposit has either already happened (single-step / Composer flow) or is pending the user's step-2 tx (two-step flow). In both cases the router emits:
 
-Check the on-chain status of a deposit intent directly from the deposit router contract.
-
-```
-GET /v1/intent-status
-```
-
-### Query Parameters
-
-| Parameter     | Type    | Required | Description                                    |
-| ------------- | ------- | -------- | ---------------------------------------------- |
-| `intent_hash` | string  | Yes      | Intent hash (bytes32 hex string)               |
-| `chain_id`    | integer | Yes      | Chain ID where the deposit router is deployed  |
-
-### Example Request
-
-```bash
-curl "https://api.yieldo.xyz/v1/intent-status?intent_hash=0xabc123...&chain_id=8453"
+```solidity
+event Routed(
+    bytes32 indexed partnerId,
+    uint8 partnerType,
+    address indexed user,
+    address indexed vault,
+    address asset,
+    uint256 amount,
+    uint256 shares
+);
 ```
 
-### Response
-
-```json
-{
-  "intent_hash": "0xabc123...",
-  "chain_id": 8453,
-  "user": "0xUserAddress...",
-  "vault": "0xVaultAddress...",
-  "asset": "0xAssetAddress...",
-  "amount": "1000000000",
-  "deadline": "1711900000",
-  "timestamp": "1711895000",
-  "executed": true,
-  "cancelled": false,
-  "explorer_link": "https://basescan.org/tx/0xabc123..."
-}
-```
-
-### Response Fields
-
-| Field           | Type   | Description                              |
-| --------------- | ------ | ---------------------------------------- |
-| `intent_hash`   | string | The queried intent hash                  |
-| `chain_id`      | int    | Chain ID                                 |
-| `user`          | string | User address from the intent             |
-| `vault`         | string | Vault address from the intent            |
-| `asset`         | string | Asset address from the intent            |
-| `amount`        | string | Deposit amount                           |
-| `deadline`      | string | Intent deadline (Unix timestamp)         |
-| `timestamp`     | string | When the intent was recorded on-chain    |
-| `executed`      | bool   | Whether the deposit was executed         |
-| `cancelled`     | bool   | Whether the intent was cancelled         |
-| `explorer_link` | string | Block explorer link                      |
-
-### Errors
-
-| Status | Description                                    |
-| ------ | ---------------------------------------------- |
-| 400    | No deposit router on the specified chain, or invalid intent hash |
+Filtering this event for `user == <user>` and `vault == <vault>` on the destination chain gives you a definitive on-chain record of the deposit and the exact shares minted. The Yieldo indexer consumes this event to power `/v1/deposits` and `/v1/positions`.

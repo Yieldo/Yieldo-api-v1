@@ -9,6 +9,7 @@ from app.models import (
     KolProfile, KolPublicProfile,
     KolSettingsUpdate, KolVaultsUpdate,
     KolDashboardResponse,
+    CreatorInviteVerifyRequest, CreatorApplicationRequest,
 )
 from app.core.auth import (
     generate_nonce, generate_session_token, hash_key,
@@ -16,7 +17,7 @@ from app.core.auth import (
 )
 from app.services import database
 
-router = APIRouter(prefix="/v1/kols", tags=["kols"])
+router = APIRouter(tags=["creators"])
 
 SESSION_DURATION_HOURS = 24
 HANDLE_RE = re.compile(r"^[a-z0-9_-]{3,32}$")
@@ -34,7 +35,7 @@ async def get_current_kol(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
     kol = await database.get_kol_by_address(session["address"])
     if not kol or kol["status"] != "active":
-        raise HTTPException(status_code=403, detail="KOL account suspended")
+        raise HTTPException(status_code=403, detail="Creator account suspended")
     return kol
 
 
@@ -44,7 +45,7 @@ async def get_current_kol(request: Request) -> dict:
 async def get_public_profile(handle: str):
     kol = await database.get_kol_by_handle(handle)
     if not kol:
-        raise HTTPException(status_code=404, detail="KOL not found")
+        raise HTTPException(status_code=404, detail="Creator not found")
     return KolPublicProfile(
         handle=kol["handle"],
         name=kol["name"],
@@ -52,15 +53,16 @@ async def get_public_profile(handle: str):
         twitter=kol.get("twitter", ""),
         enrolled_vaults=kol.get("enrolled_vaults", []),
         created_at=kol["created_at"].isoformat() if kol.get("created_at") else "",
+        founding_creator=kol.get("founding_creator", False),
     )
 
 
 @router.get("/resolve/{handle}")
 async def resolve_handle(handle: str):
-    """Resolve a KOL handle to their referrer address (fee_collector_address)."""
+    """Resolve a Creator handle to their referrer address (fee_collector_address)."""
     kol = await database.get_kol_by_handle(handle)
     if not kol:
-        raise HTTPException(status_code=404, detail="KOL not found")
+        raise HTTPException(status_code=404, detail="Creator not found")
     return {
         "handle": kol["handle"],
         "name": kol["name"],
@@ -73,12 +75,12 @@ async def resolve_handle(handle: str):
 
 @router.post("/nonce", response_model=KolNonceResponse)
 async def get_nonce(req: KolNonceRequest):
-    # Mutual exclusion: wallet partners cannot register as KOLs
+    # Mutual exclusion: wallet partners cannot register as Creators
     existing_partner = await database.get_partner_by_address(req.address)
     if existing_partner:
         raise HTTPException(
             status_code=409,
-            detail="This address is already registered as a wallet partner. A wallet cannot also be a KOL.",
+            detail="This address is already registered as a wallet partner. A wallet cannot also be a Creator.",
         )
     nonce = generate_nonce()
     await database.save_kol_nonce(req.address, nonce)
@@ -92,14 +94,29 @@ async def get_nonce(req: KolNonceRequest):
 
 @router.post("/register", response_model=KolRegisterResponse)
 async def register(req: KolRegisterRequest):
-    # Mutual exclusion: cannot be both a wallet partner and KOL
+    # Mutual exclusion: cannot be both a wallet partner and Creator
     existing_partner = await database.get_partner_by_address(req.address)
     if existing_partner:
         raise HTTPException(status_code=409, detail="This address is already registered as a wallet partner.")
 
     existing_kol = await database.get_kol_by_address(req.address)
     if existing_kol:
-        raise HTTPException(status_code=409, detail="Address already registered as a KOL")
+        raise HTTPException(status_code=409, detail="Address already registered as a Creator")
+
+    # Gate: require either a valid invite code OR tier-2 organic unlock (10+ depositing referrals)
+    invite_code = (req.invite_code or "").strip().upper()
+    invite_doc = None
+    if invite_code:
+        invite_doc = await database.verify_invite_code(invite_code)
+        if not invite_doc:
+            raise HTTPException(status_code=400, detail="Invalid or already-used invite code")
+    else:
+        depositing = await database.count_unique_depositing_referrals(req.address)
+        if depositing < 10:
+            raise HTTPException(
+                status_code=403,
+                detail="Creator access is invite-only. Enter an invite code or refer 10+ depositing users to unlock.",
+            )
 
     # Validate handle
     handle = req.handle.lower().strip()
@@ -125,12 +142,46 @@ async def register(req: KolRegisterRequest):
         twitter=req.twitter,
     )
 
+    # Mark as Founding Creator (all early signups get the badge).
+    await database.update_kol(req.address, {"founding_creator": True})
+
+    # Consume the invite code if one was used
+    if invite_code and invite_doc:
+        await database.consume_invite_code(invite_code, req.address)
+
     return KolRegisterResponse(
         address=kol["address"],
         handle=kol["handle"],
         name=kol["name"],
         created_at=kol["created_at"].isoformat(),
     )
+
+
+# ========== Invite code + application endpoints ==========
+
+@router.post("/invite/verify")
+async def verify_invite(req: CreatorInviteVerifyRequest):
+    """Check if an invite code is valid (unused). Does not consume it."""
+    code = (req.code or "").strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="Code required")
+    doc = await database.verify_invite_code(code)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Invalid or already-used code")
+    return {"valid": True, "code": code}
+
+
+@router.post("/apply")
+async def apply_for_creator(req: CreatorApplicationRequest):
+    """Submit a manual Creator application for review."""
+    if not req.twitter:
+        raise HTTPException(status_code=400, detail="Twitter handle required")
+    # Check if address already has an application
+    existing = await database.get_creator_application(req.address)
+    if existing:
+        return {"ok": True, "status": existing.get("status", "pending"), "message": "Application already submitted"}
+    app_id = await database.save_creator_application(req.address, req.twitter, req.audience, req.description)
+    return {"ok": True, "application_id": app_id, "status": "pending"}
 
 
 @router.post("/login", response_model=KolLoginResponse)

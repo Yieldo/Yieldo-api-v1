@@ -90,6 +90,14 @@ async def _ensure_indexes():
 
         kol_users = _db["kol_users"]
         await kol_users.create_index([("kol_address", 1), ("user_address", 1)], unique=True)
+
+        # Creator invite codes + applications
+        invite_codes = _db["creator_invite_codes"]
+        await invite_codes.create_index("code", unique=True)
+        await invite_codes.create_index("used")
+        creator_apps = _db["creator_applications"]
+        await creator_apps.create_index("address", unique=True)
+        await creator_apps.create_index("status")
         # User indexes
         users = _db["users"]
         await users.create_index("address", unique=True)
@@ -227,6 +235,85 @@ async def get_user_deposit_summary(address: str) -> dict:
         "failed": failed,
         "pending": pending,
     }
+
+
+# ========== Creator invite codes + applications ==========
+
+async def add_invite_codes(codes: list[str], note: str = "") -> int:
+    """Bulk-insert invite codes. Returns number inserted (duplicates ignored)."""
+    if _db is None or not codes:
+        return 0
+    now = datetime.now(timezone.utc)
+    docs = [{"code": c.upper(), "used": False, "note": note, "created_at": now} for c in codes if c]
+    inserted = 0
+    for doc in docs:
+        try:
+            await _db["creator_invite_codes"].insert_one(doc)
+            inserted += 1
+        except Exception:
+            pass  # duplicate
+    return inserted
+
+
+async def verify_invite_code(code: str) -> dict | None:
+    """Verify an invite code. Returns the doc if valid + not used, else None."""
+    if _db is None:
+        return None
+    doc = await _db["creator_invite_codes"].find_one({"code": code.upper(), "used": False})
+    return doc
+
+
+async def consume_invite_code(code: str, address: str) -> bool:
+    """Mark an invite code as used by this address."""
+    if _db is None:
+        return False
+    result = await _db["creator_invite_codes"].update_one(
+        {"code": code.upper(), "used": False},
+        {"$set": {"used": True, "used_by": address.lower(), "used_at": datetime.now(timezone.utc)}},
+    )
+    return result.modified_count > 0
+
+
+async def save_creator_application(address: str, twitter: str, audience: str, description: str) -> str:
+    """Save a Creator application for manual review."""
+    if _db is None:
+        return ""
+    doc = {
+        "address": address.lower(),
+        "twitter": twitter,
+        "audience": audience,
+        "description": description,
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc),
+    }
+    result = await _db["creator_applications"].insert_one(doc)
+    return str(result.inserted_id)
+
+
+async def get_creator_application(address: str) -> dict | None:
+    if _db is None:
+        return None
+    doc = await _db["creator_applications"].find_one({"address": address.lower()})
+    if doc:
+        doc["_id"] = str(doc["_id"])
+    return doc
+
+
+async def count_unique_depositing_referrals(referrer_address: str) -> int:
+    """Count distinct user_addresses that have deposited with the given referrer."""
+    if _db is None:
+        return 0
+    addr = referrer_address.lower()
+    # Match on `referrer` field (on-chain referrer address set by user's own referral link)
+    users = await _db["transactions"].distinct(
+        "user_address",
+        {
+            "referrer": {"$regex": f"^{addr}$", "$options": "i"},
+            "status": {"$in": ["completed", "submitted", "pending"]},
+        },
+    )
+    # Exclude self-referral
+    return len([u for u in users if u and u.lower() != addr])
 
 
 # ========== Partner / Wallet Provider ==========

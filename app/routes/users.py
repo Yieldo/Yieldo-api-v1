@@ -89,11 +89,57 @@ async def get_role(address: str):
     addr = address.lower()
     kol = await database.get_kol_by_address(addr)
     if kol and kol.get("status") == "active":
-        return {"role": "kol", "handle": kol.get("handle", "")}
+        # Return both "creator" (new) and "kol" (legacy) — frontend can check either
+        return {"role": "creator", "handle": kol.get("handle", "")}
     partner = await database.get_partner_by_address(addr)
     if partner and partner.get("status") == "active":
         return {"role": "wallet", "name": partner.get("name", "")}
     return {"role": "user"}
+
+
+# Tier thresholds (depositing referrals)
+_TIER1_THRESHOLD = 3   # Active Referrer
+_TIER2_THRESHOLD = 10  # Top Referrer (unlocks Creator invite)
+_POINTS_PER_DEPOSITING_REFERRAL = 120
+
+
+@router.get("/referrals/{address}")
+async def get_referrals(address: str):
+    """Return referral stats + tier for an investor's own referral link.
+
+    Counts UNIQUE user_addresses that deposited where referrer matches this address.
+    """
+    addr = address.lower()
+
+    depositing = await database.count_unique_depositing_referrals(addr)
+    # For clicks/signups we don't track yet — return 0. Frontend can show as 0.
+    clicks = 0
+    signups = 0
+
+    if depositing >= _TIER2_THRESHOLD:
+        tier = 2
+        tier_label = "Top Referrer"
+    elif depositing >= _TIER1_THRESHOLD:
+        tier = 1
+        tier_label = "Active Referrer"
+    else:
+        tier = 0
+        tier_label = None
+
+    points = depositing * _POINTS_PER_DEPOSITING_REFERRAL
+
+    return {
+        "address": addr,
+        "clicks": clicks,
+        "signups": signups,
+        "depositing": depositing,
+        "points": points,
+        "tier": tier,
+        "tier_label": tier_label,
+        "tier1_threshold": _TIER1_THRESHOLD,
+        "tier2_threshold": _TIER2_THRESHOLD,
+        "creator_unlocked": depositing >= _TIER2_THRESHOLD,
+    }
 
 
 @router.post("/logout")

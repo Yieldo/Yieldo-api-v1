@@ -363,6 +363,18 @@ class KolRegisterRequest(BaseModel):
     name: str
     bio: str = ""
     twitter: str = ""
+    invite_code: str = ""  # required unless depositing-referrals tier 2 reached
+
+
+class CreatorInviteVerifyRequest(BaseModel):
+    code: str
+
+
+class CreatorApplicationRequest(BaseModel):
+    address: str
+    twitter: str
+    audience: str = ""
+    description: str = ""
 
 
 class KolRegisterResponse(BaseModel):
@@ -403,6 +415,7 @@ class KolPublicProfile(BaseModel):
     twitter: str = ""
     enrolled_vaults: list[str] = []
     created_at: str = ""
+    founding_creator: bool = False
 
 
 class KolSettingsUpdate(BaseModel):

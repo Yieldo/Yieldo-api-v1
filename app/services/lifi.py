@@ -174,7 +174,7 @@ async def get_contract_calls_quote(
             error_data = resp.json()
         except Exception:
             pass
-        if error_data.get("code") in (1002, 1011) and not is_same_chain and "allowBridges" in body:
+        if error_data.get("code") in (1001, 1002, 1011) and not is_same_chain and "allowBridges" in body:
             retry_body = {k: v for k, v in body.items() if k != "allowBridges"}
             retry_resp = await client.post(
                 f"{LIFI_BASE_URL}/quote/contractCalls",

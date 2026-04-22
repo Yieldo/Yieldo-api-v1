@@ -196,6 +196,10 @@ class Position(BaseModel):
     current_assets: Optional[str] = None   # share_balance converted to asset via convertToAssets or share_price
     deposited_assets: Optional[str] = None  # sum of historical deposit amounts for this vault
     yield_assets: Optional[str] = None      # current_assets - deposited_assets (may be negative)
+    # USD-denominated values (from Zerion when available)
+    value_usd: Optional[float] = None       # current position value in USD
+    apy: Optional[float] = None             # APY as fraction (0.045 = 4.5%) when reported by Zerion
+    source: str = "rpc"                     # "zerion" or "rpc" — for debugging
 
 
 class PositionsResponse(BaseModel):

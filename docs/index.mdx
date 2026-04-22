@@ -20,11 +20,13 @@ https://api.yieldo.xyz
 
 ## Key Concepts
 
-### Attribution-Only Router (V3.1.0)
+### Attribution-Only Router (V3.1.1)
 
-Yieldo's deposit router is non-custodial — it pulls tokens from the user, deposits them into the vault, and emits a `Routed` event for on-chain attribution. No fees are deducted. 100% of the user's deposit goes into the vault.
+Yieldo's deposit router is non-custodial — it pulls tokens from the caller, deposits them into the vault, and emits a `Routed` event for on-chain attribution. No fees are deducted. 100% of the user's deposit goes into the vault.
 
-V3.1.0 adds an `authorizedCallers` whitelist so LiFi's Composer (Executor / Diamond) can execute `depositFor(..., user=<user>)` atomically on the destination chain. An 8-arg `depositFor` overload with `minSharesOut` provides an on-chain slippage floor; the 7-arg form is kept as a compatibility shim. The `Routed` event now includes the exact shares minted.
+V3.1.1 keeps the depositFor entry point **open to any caller** — any address can call `depositFor(..., user=<anyone>)`, making the composer flow work across every LiFi bridge-receiver variant (ReceiverAcrossV3/V4, ReceiverStargateV2, ReceiverChainflip, per-chain Executors) without needing a router upgrade whenever LiFi adds a new bridge. Funds are always pulled from `msg.sender`, so the caller can only ever spend their own balance.
+
+V3.1.0 shipped an 8-arg `depositFor` overload with `minSharesOut` for on-chain slippage protection (7-arg form kept as compat shim), and added `shares` to the `Routed` event.
 
 Each deposit carries a `partnerId` and `partnerType` for attribution — identifying which wallet, creator, or integration referred the user. This is used for revenue share tracking with vault partners.
 
@@ -35,7 +37,7 @@ See [Deposit Router Contracts](/guides/deposit-router-contracts) for the full in
 For cross-chain deposits, Yieldo uses [LiFi](https://li.fi/) to bridge and swap tokens. Users can choose from multiple bridge routes (like Jumper.exchange), with the best route auto-selected.
 
 Two flows are supported:
-- **Single-step (LiFi Composer)** — used for Morpho / ERC-4626 vaults. LiFi bridges and calls `router.depositFor(...)` on the destination in one tx. The router authorizes LiFi via its `authorizedCallers` whitelist.
+- **Single-step (LiFi Composer)** — used for Morpho / ERC-4626 vaults. LiFi bridges and calls `router.depositFor(...)` on the destination in one tx. Any bridge receiver can make the call (V3.1.1 — no whitelist).
 - **Two-step** — used for vault types that aren't composable with the bridge (Midas, Veda, Custom, IPOR, Lido). Step 1 bridges tokens to the user's wallet on the destination chain; step 2 is a same-chain `depositFor` call the user signs themselves.
 
 ### Vault Adapter Pattern

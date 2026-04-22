@@ -169,7 +169,7 @@ curl -X POST https://api.yieldo.xyz/v1/quote/build \
 
 ### Response (Single-Step)
 
-For direct deposits and Morpho-compatible cross-chain deposits, the build returns a single transaction that bridges + deposits atomically via LiFi Composer. On cross-chain deposits the `to` address is LiFi's Diamond; LiFi then calls `router.depositFor(...)` on the destination chain (the router's `authorizedCallers` whitelist authorizes LiFi's Executor). On same-chain deposits the `to` address is the Yieldo router directly.
+For direct deposits and Morpho-compatible cross-chain deposits, the build returns a single transaction that bridges + deposits atomically via LiFi Composer. On cross-chain deposits the `to` address is LiFi's Diamond; LiFi then calls `router.depositFor(...)` on the destination chain via its bridge-specific receiver (Executor / ReceiverAcrossV4 / ReceiverStargateV2 / etc.). V3.1.1 accepts calls from any address, so new LiFi receivers work without a router upgrade. On same-chain deposits the `to` address is the Yieldo router directly.
 
 The calldata currently uses the **7-arg `depositFor`** form (compat shim) with `minSharesOut = 0`. A future release will switch to the 8-arg form with a computed `minSharesOut` for on-chain slippage protection.
 

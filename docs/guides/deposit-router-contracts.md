@@ -1,22 +1,28 @@
 ---
 title: "Deposit Router Contracts"
-description: "V3.1.0 attribution-only router, vault dispatch, authorized callers"
+description: "V3.1.1 attribution-only router, vault dispatch, open caller model"
 ---
 
 The Deposit Router is an attribution-only, non-custodial pass-through. It pulls tokens from the caller, dispatches to the correct vault protocol (ERC-4626, Midas issuance vault, Veda teller, Lido queue, or custom adapter), forwards the minted shares to the user, and emits a `Routed` event for on-chain attribution. **No fees are deducted** — 100% of the user's tokens reach the vault.
 
-Current version: **V3.1.0**.
+Current version: **V3.1.1** on all L2 / alt chains. Ethereum mainnet is on V3.1.0 pending a low-basefee upgrade window.
+
+## What Changed in V3.1.1
+
+- **Removed the `authorizedCallers` gate on `depositFor` / `depositRequestFor`.** Any address can now call with an arbitrary `user` argument, which is used purely for the `Routed` event and as the share recipient. This removes ops friction of whitelisting every new LiFi bridge-receiver contract (ReceiverAcrossV3/V4, ReceiverStargateV2, ReceiverChainflip, per-chain Executors, etc.) and keeps the composer flow working across bridge updates without a router upgrade.
+- Security note: funds are pulled from `msg.sender` (the caller must own the tokens or have been approved), so no one can spend a third party's balance. The remaining risk is **attribution spoofing** — anyone can emit a `Routed` event with an unrelated `user`/`partnerId`. Attribution consumers (revenue share, referrer tiering) should treat `Routed` events as advisory and cross-check against on-chain share balances where strict correctness matters.
+- `authorizedCallers` storage slot and the admin functions (`setAuthorizedCaller`, `setAuthorizedCallerBatch`) are preserved for forward compatibility but are not consulted by the current implementation.
 
 ## What Changed in V3.1.0
 
-- **`authorizedCallers` mapping** — a whitelist that controls who may pass a `user` address different from `msg.sender`. LiFi's Executor and Diamond contracts are whitelisted on chains where the composer is live (Ethereum, Base, Arbitrum, Optimism). On two-step chains (Monad, Katana) no whitelist is needed because the user signs their own `depositFor` call on the destination chain.
-- **8-arg `depositFor` with `minSharesOut`** — new slippage floor on same-chain deposits. The 7-arg form is kept as a compatibility shim (forwards with `minSharesOut=0`).
+- **8-arg `depositFor` with `minSharesOut`** — on-chain slippage floor. The 7-arg form is kept as a compatibility shim (forwards with `minSharesOut=0`).
 - **Shares returned explicitly** — `_executeVaultCall` now returns the exact shares minted, cross-checked against `balanceOf(recipient)` to detect silent failures in downstream adapters.
 - **`Routed` event now includes `shares`** — previously indexers had to read vault share balances to compute this.
+- Introduced `authorizedCallers` whitelist (removed again in V3.1.1 — see above).
 
 ## Contract Addresses
 
-All chains are on V3.1.0 as of 2026-04-23. Same proxy address on Katana and HyperEVM is coincidental (CREATE2 on separate chains).
+All chains except Ethereum are on V3.1.1 as of 2026-04-23. Same proxy address on Katana and HyperEVM is coincidental (CREATE2 on separate chains).
 
 | Chain    | Chain ID | Proxy Address                                 |
 | -------- | -------- | --------------------------------------------- |
@@ -60,7 +66,7 @@ User sends LiFi tx on source chain → LiFi Executor on destination receives tok
   → Executor calls router.depositFor(..., user=<user>) → Shares sent to user
 ```
 
-Because msg.sender is the LiFi Executor (not the user), the router checks `authorizedCallers[msg.sender]` to authorize the call.
+Because msg.sender is a LiFi bridge receiver (Executor, ReceiverAcrossV4, ReceiverStargateV2, etc.), the router must allow callers other than `user`. V3.1.1 accepts any msg.sender — only `msg.sender`'s own balance can be pulled.
 
 ## depositFor
 
@@ -91,11 +97,14 @@ function depositFor(
 ) external;
 ```
 
-Access control inside both forms:
+Access control inside both forms (V3.1.1):
 
 ```solidity
-require(msg.sender == user || authorizedCallers[msg.sender], "Unauthorized caller");
+require(user != address(0) && vault != address(0) && asset != address(0) && amount > 0, "Bad params");
+// No caller gate — any msg.sender may call with any `user`.
 ```
+
+`msg.sender` is still the token source (`safeTransferFrom(msg.sender, ...)`), so only the caller's own balance can ever be spent.
 
 ## depositRequestFor
 
@@ -138,7 +147,7 @@ event DepositRequestRouted(
 );
 
 event VaultAdapterUpdated(address indexed vault, address indexed adapter);
-event AuthorizedCallerUpdated(address indexed caller, bool authorized);
+event AuthorizedCallerUpdated(address indexed caller, bool authorized); // emitted by admin setter; no longer affects caller access in V3.1.1
 ```
 
 ## Vault Dispatch Priority
@@ -179,23 +188,13 @@ router.setVaultAdapter(vaultAddress, adapterAddress);      // single
 router.setVaultAdapterBatch(vaults[], adapters[]);          // batch
 ```
 
-## Authorized Callers (V3.1.0)
+## Caller Model (V3.1.1)
 
-Who can call `depositFor(..., user=<someoneElse>)`:
+V3.1.1 removes the caller whitelist. Any address may call `depositFor(..., user=<anyone>)`. The admin setters (`setAuthorizedCaller`, `setAuthorizedCallerBatch`) and the `authorizedCallers` mapping still exist in storage but are not consulted by the current implementation — they remain in place so the whitelist can be re-enabled in a future release without a storage-layout migration.
 
-- `msg.sender == user` — always allowed (same-chain direct deposits)
-- `authorizedCallers[msg.sender] == true` — LiFi Executor / Diamond in production
+Why the gate was removed: LiFi routes composer deposits through several different bridge-specific receivers (ReceiverAcrossV3, ReceiverAcrossV4, ReceiverStargateV2, ReceiverChainflip, plus per-chain Executors), and each new bridge LiFi supports would otherwise require a whitelist update on every router proxy. V3.1.0's Whitelist model couldn't keep up.
 
-Admin management:
-```solidity
-router.setAuthorizedCaller(caller, true);
-router.setAuthorizedCallerBatch(callers[], flags[]);
-```
-
-Currently whitelisted on composer-capable chains (Ethereum, Base, Arbitrum, Optimism):
-- `0x4DaC9d1769b9b304cb04741DCDEb2FC14aBdF110` — LiFi Executor (current, CREATE3 deterministic)
-- `0x2dC0E2aa608532Da689e89e237dF582B783E5408` — LiFi Executor (legacy variant, defensive)
-- `0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE` — LiFi Diamond (same-chain composer)
+Trade-off: anyone can emit a `Routed` event with a spoofed `user` / `partnerId`. Funds are safe (`safeTransferFrom` pulls from `msg.sender` only), but attribution consumers should treat `Routed` events as informational and verify with on-chain share balances when exact attribution matters.
 
 ## Admin Functions
 

@@ -103,7 +103,7 @@ def encode_deposit_for_calldata(
     is_erc4626: bool,
     min_shares_out: int | None = None,
 ) -> str:
-    """Build depositFor calldata. V3.1.0+ accepts an 8-arg variant with minSharesOut slippage
+    """Build depositFor calldata. V3.1.x accepts an 8-arg variant with minSharesOut slippage
     protection; V3.0.0 only accepts the 7-arg variant. Pass None (default) to use the 7-arg form
     for backward compatibility; pass an int (including 0) to use the 8-arg form."""
     router = get_deposit_router(chain_id)

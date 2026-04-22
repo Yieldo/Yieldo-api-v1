@@ -24,7 +24,7 @@ Source Chain                               Destination Chain
                                           └──────────────────────────────┘
 ```
 
-LiFi's Executor is on the router's `authorizedCallers` whitelist (V3.1.0), so it can pass `user=<user>` instead of `msg.sender`. No user signature beyond the bridge tx.
+LiFi's bridge receiver (Executor / ReceiverAcrossV4 / ReceiverStargateV2 / etc.) passes `user=<user>` instead of `msg.sender`. V3.1.1 removed the `authorizedCallers` gate so any LiFi receiver works without a router upgrade. No user signature beyond the bridge tx.
 
 ### Two-Step
 
@@ -34,7 +34,7 @@ Used for vault types LiFi Composer doesn't natively understand (Midas, Veda, Cus
 Step 1 (source):   User sends bridge tx
                    → tokens arrive at user's wallet on destination
 Step 2 (dest):     User approves + calls router.depositFor(...) themselves
-                   → msg.sender == user, so no whitelist needed
+                   → msg.sender == user (same-chain deposit on destination)
                    → shares land in user's wallet
 ```
 
@@ -134,5 +134,5 @@ Use `GET /v1/tokens?chain_id={id}` to get the exact list of tokens for each chai
 | "No route found"                           | LiFi can't find a bridge/swap path       | Try a different source token or larger amount |
 | "LiFi contract calls quote unavailable"    | Bridge doesn't support contract calls    | Use a different source chain                  |
 | "Zero output amount"                       | Amount too small after fees/slippage     | Increase the deposit amount                   |
-| "Unauthorized caller" (on-chain revert)    | LiFi Executor not whitelisted on router  | Chain not yet on V3.1.0 — report to Yieldo    |
+| `PARTIAL` substatus, tokens refunded       | Bridge delivered but dest contract call skipped (amount mismatch vs. calldata) | Retry with a larger amount, or contact Yieldo |
 | Transfer stuck in `PENDING`                | Bridge congestion or delays              | Wait and keep polling; bridges can be slow    |

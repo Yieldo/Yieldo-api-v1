@@ -76,7 +76,7 @@ curl "https://api.yieldo.xyz/v1/status?tx_hash=0xabc...&from_chain_id=42161&to_c
 
 ## Verifying the Deposit On-Chain
 
-V3.1.0 of the Yieldo router no longer uses signed deposit intents. Once the bridge is `DONE`, the deposit has either already happened (single-step / Composer flow) or is pending the user's step-2 tx (two-step flow). In both cases the router emits:
+The V3.1.x Yieldo router does not use signed deposit intents. Once the bridge is `DONE`, the deposit has either already happened (single-step / Composer flow) or is pending the user's step-2 tx (two-step flow). In both cases the router emits:
 
 ```solidity
 event Routed(

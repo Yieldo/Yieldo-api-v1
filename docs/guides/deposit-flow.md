@@ -102,6 +102,47 @@ const txHash = await walletClient.sendTransaction({
 });
 ```
 
+## Step 5b: Handle Two-Step Cross-Chain Deposits
+
+For certain vault types (Midas, Veda, Custom, IPOR, Lido), the build response has `two_step: true`. LiFi Composer doesn't natively understand these deposit interfaces, so we split the flow:
+
+1. Step 1 = bridge tokens to the user's wallet on the destination chain (the main `transaction_request`)
+2. Wait for LiFi to confirm the bridge is `DONE`
+3. Step 2 = same-chain deposit on the destination, using `buildData.deposit_tx`
+
+```javascript
+if (buildData.two_step) {
+  // Step 1 already sent — poll until bridge completes
+  await pollStatus(txHash, buildData.tracking.from_chain_id, buildData.tracking.to_chain_id);
+
+  // Step 2: switch to destination chain + approve + deposit
+  const { deposit_tx } = buildData;
+
+  if (walletChainId !== deposit_tx.transaction_request.chain_id) {
+    await switchChain({ chainId: deposit_tx.transaction_request.chain_id });
+  }
+
+  if (deposit_tx.approval) {
+    const approveTx = await walletClient.writeContract({
+      address: deposit_tx.approval.token_address,
+      abi: erc20Abi,
+      functionName: 'approve',
+      args: [deposit_tx.approval.spender_address, BigInt(deposit_tx.approval.amount)],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: approveTx });
+  }
+
+  const depositTxHash = await walletClient.sendTransaction({
+    to: deposit_tx.transaction_request.to,
+    data: deposit_tx.transaction_request.data,
+    value: BigInt(deposit_tx.transaction_request.value),
+    chain: { id: deposit_tx.transaction_request.chain_id },
+  });
+}
+```
+
+The user's tokens are always safe — they land in the user's wallet after the bridge. Step 2 can be retried if anything fails.
+
 ## Step 6: Track the Deposit
 
 For cross-chain deposits, poll the status endpoint until the transfer completes.

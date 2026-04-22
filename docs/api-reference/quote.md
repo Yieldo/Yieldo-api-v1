@@ -167,7 +167,9 @@ curl -X POST https://api.yieldo.xyz/v1/quote/build \
   }'
 ```
 
-### Response
+### Response (Single-Step)
+
+For direct deposits and Morpho-compatible cross-chain deposits, the build returns a single transaction that bridges + deposits atomically via LiFi Composer:
 
 ```json
 {
@@ -189,9 +191,49 @@ curl -X POST https://api.yieldo.xyz/v1/quote/build \
     "bridge": "stargate",
     "lifi_explorer": "https://explorer.li.fi"
   },
-  "tracking_id": "abc123..."
+  "tracking_id": "abc123...",
+  "two_step": false
 }
 ```
+
+### Response (Two-Step Cross-Chain)
+
+For vault types that LiFi Composer doesn't natively understand (Midas, Veda, Custom, IPOR, Lido), the response has `two_step: true`. The frontend must:
+
+1. Execute `transaction_request` — LiFi bridges tokens to the user's wallet on the destination chain
+2. Poll `/v1/status` until bridge is `DONE`
+3. Execute `deposit_tx.transaction_request` (preceded by `deposit_tx.approval` if present) — a same-chain deposit on the destination
+
+```json
+{
+  "transaction_request": { "to": "0x...", "data": "0x...", "value": "0", "chain_id": 42161 },
+  "approval": { "token_address": "0x...", "spender_address": "0x...", "amount": "1000000000" },
+  "tracking": {
+    "from_chain_id": 42161,
+    "to_chain_id": 1,
+    "bridge": "stargate",
+    "lifi_explorer": "https://explorer.li.fi"
+  },
+  "tracking_id": "abc123...",
+  "two_step": true,
+  "deposit_tx": {
+    "transaction_request": {
+      "to": "0x85f76c1685046Ea226E1148EE1ab81a8a15C385d",
+      "data": "0x...",
+      "value": "0",
+      "chain_id": 1,
+      "gas_limit": "900000"
+    },
+    "approval": {
+      "token_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "spender_address": "0x85f76c1685046Ea226E1148EE1ab81a8a15C385d",
+      "amount": "999500000"
+    }
+  }
+}
+```
+
+This trades one extra click for near-zero revert risk on protocols whose deposit interfaces aren't composable with the bridge.
 
 ### Transaction Request Fields
 
@@ -203,9 +245,20 @@ curl -X POST https://api.yieldo.xyz/v1/quote/build \
 | `chain_id`  | int         | Chain to submit the transaction on         |
 | `gas_limit` | string/null | Suggested gas limit                        |
 
+### Top-Level Response Fields
+
+| Field                 | Type         | Description                                                  |
+| --------------------- | ------------ | ------------------------------------------------------------ |
+| `transaction_request` | object       | Primary transaction (bridge+deposit or same-chain deposit)   |
+| `approval`            | object/null  | ERC-20 approval required before sending the transaction      |
+| `tracking`            | object       | Info for polling `/v1/status`                                |
+| `tracking_id`         | string       | Internal tracking ID for correlating across our systems      |
+| `two_step`            | bool         | `true` when destination deposit must be sent as a second tx  |
+| `deposit_tx`          | object/null  | Step-2 details when `two_step=true`                          |
+
 ### Errors
 
 | Status | Description                                          |
 | ------ | ---------------------------------------------------- |
-| 400    | No route found or build failed                       |
+| 400    | No route found, below min deposit, or build failed   |
 | 404    | Vault not found                                      |

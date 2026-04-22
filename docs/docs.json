@@ -51,7 +51,10 @@
               "api-reference/vaults",
               "api-reference/quote",
               "api-reference/status",
-              "api-reference/chains-and-tokens"
+              "api-reference/positions",
+              "api-reference/chains-and-tokens",
+              "api-reference/creators",
+              "api-reference/users"
             ]
           },
           {

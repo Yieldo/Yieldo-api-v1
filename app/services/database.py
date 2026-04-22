@@ -299,6 +299,40 @@ async def get_creator_application(address: str) -> dict | None:
     return doc
 
 
+async def get_deposited_per_vault(user_address: str) -> dict[str, int]:
+    """Return {vault_id: total_deposited_asset_amount} for completed deposits.
+
+    Amount is the asset amount that ended up in the vault (deposit_amount if present,
+    else the source amount). Values are integers in the vault asset's smallest unit.
+    """
+    if _db is None:
+        return {}
+    addr = user_address.lower()
+    cursor = _db["transactions"].find(
+        {"user_address": addr, "status": {"$in": ["completed", "submitted", "pending"]}},
+    )
+    totals: dict[str, int] = {}
+    async for tx in cursor:
+        vid = tx.get("vault_id")
+        if not vid:
+            continue
+        # Prefer the built-intent amount (what actually hits the vault) if stored,
+        # else fall back to from_amount for same-asset direct deposits.
+        amt_str = (
+            tx.get("intent_amount")
+            or tx.get("deposit_amount")
+            or tx.get("to_amount")
+            or tx.get("from_amount")
+            or "0"
+        )
+        try:
+            amt = int(amt_str)
+        except (ValueError, TypeError):
+            continue
+        totals[vid] = totals.get(vid, 0) + amt
+    return totals
+
+
 async def count_unique_depositing_referrals(referrer_address: str) -> int:
     """Count distinct user_addresses that have deposited with the given referrer."""
     if _db is None:

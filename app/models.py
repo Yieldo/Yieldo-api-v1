@@ -188,9 +188,14 @@ class Position(BaseModel):
     chain_id: int
     asset_symbol: str
     asset_address: str
+    asset_decimals: int = 18
     share_balance: str
     share_decimals: int
     vault_type: str
+    # Yield tracking — all in asset smallest units (wei-equivalent for the asset's decimals)
+    current_assets: Optional[str] = None   # share_balance converted to asset via convertToAssets or share_price
+    deposited_assets: Optional[str] = None  # sum of historical deposit amounts for this vault
+    yield_assets: Optional[str] = None      # current_assets - deposited_assets (may be negative)
 
 
 class PositionsResponse(BaseModel):

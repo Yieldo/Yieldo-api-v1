@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from app.core.constants import (
     DEPOSIT_ROUTER_ADDRESSES,
@@ -8,16 +9,22 @@ from app.core.constants import (
 from app.services.rpc import get_vault_asset, get_token_decimals
 from app.models import VaultResponse, AssetInfo
 
+logger = logging.getLogger(__name__)
+
 _vaults: dict[str, dict] = {}
 
 
-def _resolve_asset(chain_id: int, asset_symbol: str, vault_address: str) -> tuple[str, int]:
+def _resolve_asset(chain_id: int, asset_symbol: str, vault_address: str) -> tuple[str, int] | None:
     chain_assets = ASSET_TOKEN_CONFIG.get(chain_id, {})
     if asset_symbol in chain_assets:
         return chain_assets[asset_symbol]
-    asset_addr = get_vault_asset(chain_id, vault_address)
-    decimals = get_token_decimals(chain_id, asset_addr)
-    return asset_addr, decimals
+    try:
+        asset_addr = get_vault_asset(chain_id, vault_address)
+        decimals = get_token_decimals(chain_id, asset_addr)
+        return asset_addr, decimals
+    except Exception as e:
+        logger.warning(f"Failed to resolve asset for vault {chain_id}:{vault_address}: {e}")
+        return None
 
 
 def load_vaults():
@@ -31,7 +38,11 @@ def load_vaults():
         if chain_id not in DEPOSIT_ROUTER_ADDRESSES:
             continue
         vault_id = f"{chain_id}:{v['address'].lower()}"
-        asset_addr, asset_decimals = _resolve_asset(chain_id, v["asset"], v["address"])
+        resolved = _resolve_asset(chain_id, v["asset"], v["address"])
+        if resolved is None:
+            logger.warning(f"Skipping vault {vault_id} ({v['name']}): asset unresolvable")
+            continue
+        asset_addr, asset_decimals = resolved
         _vaults[vault_id] = {
             "vault_id": vault_id,
             "name": v["name"],

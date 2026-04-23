@@ -19,7 +19,11 @@ from app.core.constants import (
     DEPOSIT_ROUTER_ADDRESSES,
 )
 from app.services.vault import get_vault, get_vault_response
-from app.services.rpc import get_vault_share_price, encode_deposit_for_calldata
+from app.services.rpc import (
+    get_vault_share_price,
+    encode_deposit_for_calldata,
+    encode_deposit_for_available_calldata,
+)
 from app.services import lifi
 from app.services import database
 from app.routes.partners import get_partner_from_api_key
@@ -294,26 +298,22 @@ async def build_transaction(req: BuildRequest, request: Request):
 
     cc_quote = None
     if not force_two_step:
-        to_amount, to_amount_min = lifi.extract_quote_amounts(lifi_quote)
-        # CRITICAL: LiFi's Executor sets `_swapData.fromAmount` to the *actual* bridge delivery
-        # but does NOT patch our calldata's `amount` parameter. Our depositFor calls
-        # transferFrom(Executor, Router, amount) — if amount > actual delivery the call
-        # reverts and LiFi refunds as PARTIAL. LiFi's quoted `toAmountMin` is unreliable for
-        # this — Across in particular often reports toAmountMin == toAmount even though actual
-        # delivery is 0.3-0.7% lower due to relayer fees. We apply a fixed 2% buffer below
-        # LiFi's optimistic to_amount; any dust left on Executor is swept back to the user
-        # by LiFi's tx-end refund logic.
-        COMPOSER_BUFFER_BPS = 200  # 2.00% — covers Across LP + relayer fee + small slip
-        safe_amount = int(int(to_amount) * (10000 - COMPOSER_BUFFER_BPS) // 10000)
-        cc_amount = str(safe_amount)
-        cc_calldata = encode_deposit_for_calldata(
-            to_chain, vault["address"], to_token, safe_amount,
+        to_amount, _ = lifi.extract_quote_amounts(lifi_quote)
+        # V3.2.0+ uses depositForAvailable: the router pulls min(allowance, balance) from
+        # msg.sender, so any bridge fee underflow is handled cleanly without calldata
+        # amount mismatch. LiFi's Executor approves us for the exact post-bridge amount
+        # before invoking, so this naturally consumes whatever was delivered.
+        cc_calldata = encode_deposit_for_available_calldata(
+            to_chain, vault["address"], to_token,
             req.user_address, partner_id, partner_type, is_erc4626,
+            min_amount=0, min_shares_out=0,
         )
+        # Hint LiFi with the optimistic to_amount so its swap planning works; the actual
+        # consumed amount is decided on-chain by the router, not by this number.
         cc_quote = await lifi.get_contract_calls_quote(
             req.from_chain_id, req.from_token, req.from_amount,
             to_chain, to_token, req.user_address,
-            deposit_router, cc_calldata, cc_amount,
+            deposit_router, cc_calldata, str(to_amount),
             preferred_bridges=[bridge] if bridge else None,
             slippage=req.slippage,
         )
@@ -325,12 +325,15 @@ async def build_transaction(req: BuildRequest, request: Request):
             raise HTTPException(status_code=400, detail="No bridge route found")
         approval_target = tx_req.get("to", "")
 
-        to_amount, to_amount_min = lifi.extract_quote_amounts(lifi_quote)
-        # Conservative amount so the user's step-2 transferFrom succeeds even if the bridge
-        # delivered less than the optimistic to_amount.
-        dep_amount = to_amount_min if to_amount_min and int(to_amount_min) > 0 else to_amount
+        to_amount, _ = lifi.extract_quote_amounts(lifi_quote)
+        # Same buffer logic as composer: bridge delivery often lands below LiFi's quoted
+        # toAmountMin. The user signs step-2 themselves with their own balance, so an
+        # optimistic amount would revert their tx. 2% buffer = ~$0.03 dust per $1.50 deposit
+        # left in the user's own wallet (they keep it, no loss).
+        TWO_STEP_BUFFER_BPS = 200
+        dep_amount = int(int(to_amount) * (10000 - TWO_STEP_BUFFER_BPS) // 10000)
         dep_calldata = encode_deposit_for_calldata(
-            to_chain, vault["address"], to_token, int(dep_amount),
+            to_chain, vault["address"], to_token, dep_amount,
             req.user_address, partner_id, partner_type, is_erc4626,
         )
 
@@ -365,7 +368,7 @@ async def build_transaction(req: BuildRequest, request: Request):
                 approval=ApprovalData(
                     token_address=to_token,
                     spender_address=deposit_router,
-                    amount=str(int(dep_amount)),
+                    amount=str(dep_amount),
                 ),
             ),
         )

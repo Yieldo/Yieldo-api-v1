@@ -44,6 +44,22 @@ DEPOSIT_ROUTER_ABI = [
         "stateMutability": "nonpayable",
         "type": "function",
     },
+    {
+        "inputs": [
+            {"internalType": "address", "name": "vault", "type": "address"},
+            {"internalType": "address", "name": "asset", "type": "address"},
+            {"internalType": "address", "name": "user", "type": "address"},
+            {"internalType": "bytes32", "name": "partnerId", "type": "bytes32"},
+            {"internalType": "uint8", "name": "partnerType", "type": "uint8"},
+            {"internalType": "bool", "name": "isERC4626", "type": "bool"},
+            {"internalType": "uint256", "name": "minAmount", "type": "uint256"},
+            {"internalType": "uint256", "name": "minSharesOut", "type": "uint256"},
+        ],
+        "name": "depositForAvailable",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
 ]
 
 ERC4626_ABI = [

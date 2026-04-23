@@ -131,6 +131,37 @@ def encode_deposit_for_calldata(
     return router.encode_abi(abi_element_identifier="depositFor", args=args)
 
 
+def encode_deposit_for_available_calldata(
+    chain_id: int,
+    vault: str,
+    asset: str,
+    user: str,
+    partner_id: bytes,
+    partner_type: int,
+    is_erc4626: bool,
+    min_amount: int = 0,
+    min_shares_out: int = 0,
+) -> str:
+    """V3.2.0+ composer-friendly entry: pulls min(allowance, balance) from msg.sender,
+    so cross-chain composer flows don't need a hardcoded amount that bridge fees might
+    underflow. The caller (e.g. LiFi Executor) approves the router for the exact
+    post-bridge amount before invoking us."""
+    router = get_deposit_router(chain_id)
+    return router.encode_abi(
+        abi_element_identifier="depositForAvailable",
+        args=[
+            Web3.to_checksum_address(vault),
+            Web3.to_checksum_address(asset),
+            Web3.to_checksum_address(user),
+            partner_id,
+            partner_type,
+            is_erc4626,
+            min_amount,
+            min_shares_out,
+        ],
+    )
+
+
 def encode_deposit_request_for_calldata(
     chain_id: int,
     vault: str,

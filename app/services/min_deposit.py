@@ -79,11 +79,58 @@ def _veda_min_mint(w3, teller: str, asset: str) -> Optional[int]:
 
 
 def _midas_min(w3, issuance_vault: str, asset: str) -> Optional[int]:
-    """Midas instant-issuance vault: instantInitialDeposit(asset) or minBuyAmount(asset)."""
+    """Midas instant-issuance vault: minBuyAmount(asset) / instantInitialDeposit(asset)."""
     for fn in ("minBuyAmount", "instantInitialDeposit", "minDepositAmount"):
         v = _try_call_with_arg(w3, issuance_vault, fn, "address", w3.to_checksum_address(asset))
         if v is not None and v > 0:
             return v
+    # Some Midas IVs use a no-arg uint256 for the min in 18-dec units
+    for fn in ("minDepositAmountInBase18", "minAmountToDepositInBase18"):
+        v = _try_call(w3, issuance_vault, fn)
+        if v is not None and v > 0:
+            return v
+    return None
+
+
+def _read_router_midas_vault(w3, router: str, share_token: str) -> Optional[str]:
+    """Read midasVaults(shareToken) from our DepositRouter — gives us the IV address."""
+    try:
+        contract = w3.eth.contract(
+            address=w3.to_checksum_address(router),
+            abi=[{
+                "inputs": [{"type": "address", "name": "x"}],
+                "name": "midasVaults",
+                "outputs": [{"type": "address", "name": ""}],
+                "stateMutability": "view",
+                "type": "function",
+            }],
+        )
+        addr = contract.functions.midasVaults(w3.to_checksum_address(share_token)).call()
+        if addr and int(addr, 16) != 0:
+            return addr
+    except Exception:
+        pass
+    return None
+
+
+def _read_router_veda_teller(w3, router: str, vault: str) -> Optional[str]:
+    """Read vedaTellers(vault) from our DepositRouter."""
+    try:
+        contract = w3.eth.contract(
+            address=w3.to_checksum_address(router),
+            abi=[{
+                "inputs": [{"type": "address", "name": "x"}],
+                "name": "vedaTellers",
+                "outputs": [{"type": "address", "name": ""}],
+                "stateMutability": "view",
+                "type": "function",
+            }],
+        )
+        addr = contract.functions.vedaTellers(w3.to_checksum_address(vault)).call()
+        if addr and int(addr, 16) != 0:
+            return addr
+    except Exception:
+        pass
     return None
 
 
@@ -144,17 +191,29 @@ def resolve(vault: dict) -> tuple[Optional[int], bool]:
                 has_no_min = True
 
         elif vtype == "accountable":
-            # Accountable vaults already pre-populated in JSON. If we get here,
-            # try generic.
+            # Accountable vaults already pre-populated in JSON. If we get here
+            # without a JSON value, probe; if nothing, no enforced minimum.
             min_amount = _generic_min(w3, vault["address"])
+            if min_amount is None:
+                has_no_min = True
 
         elif vtype == "veda":
-            # Veda's Teller is a separate contract. Without knowing the teller
-            # mapping client-side, just try generic on the vault.
-            min_amount = _generic_min(w3, vault["address"])
+            # Veda BoringVault: there is NO contract-enforced minimum. The min is
+            # the `minimumMint` parameter the caller supplies per-tx. Our router
+            # passes 0 (no slippage check at the Veda layer — vaults dispatch
+            # picks shares > 0). Truthful answer: no enforced minimum.
+            has_no_min = True
 
         elif vtype == "midas":
-            min_amount = _generic_min(w3, vault["address"])
+            # Midas: probe the issuance vault, not the share token. Read the
+            # issuance vault address from our router's midasVaults mapping.
+            router = vault.get("deposit_router")
+            iv = _read_router_midas_vault(w3, router, vault["address"]) if router else None
+            if iv and asset_addr:
+                min_amount = _midas_min(w3, iv, asset_addr)
+            if min_amount is None:
+                # Issuance vault unknown to us → fall through; generic may catch it
+                min_amount = _generic_min(w3, vault["address"])
 
         elif vtype == "lido":
             min_amount = _lido_min(w3, vault["address"])
@@ -168,9 +227,12 @@ def resolve(vault: dict) -> tuple[Optional[int], bool]:
 
         else:
             min_amount = _generic_min(w3, vault["address"])
+            if min_amount is None:
+                has_no_min = True
 
     except Exception as e:
         logger.warning(f"min_deposit resolve failed for {chain_id}:{addr}: {e}")
+        # On RPC error, do not claim no_minimum; leave as unknown so the UI is honest
 
     _CACHE[cache_key] = (now, min_amount, has_no_min)
     return min_amount, has_no_min
@@ -178,12 +240,20 @@ def resolve(vault: dict) -> tuple[Optional[int], bool]:
 
 def warm_cache(vaults: list[dict], max_workers: int = 16) -> None:
     """Pre-resolve all vault minimums in parallel so the first /v1/vaults response
-    is fast. Called once on app startup. Failures are silently cached as None."""
+    is fast. Called once on app startup. Failures are silently cached as None.
+    Clears any stale cache entries first so resolver-logic changes take effect."""
+    _CACHE.clear()
     from concurrent.futures import ThreadPoolExecutor
     started = time.time()
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        list(pool.map(lambda v: _safe_resolve(v), vaults))
-    logger.info(f"min_deposit warm-cache done: {len(vaults)} vaults in {time.time() - started:.1f}s")
+        list(pool.map(_safe_resolve, vaults))
+    explicit = sum(1 for v in _CACHE.values() if v[1] is not None)
+    no_min = sum(1 for v in _CACHE.values() if v[1] is None and v[2])
+    unknown = sum(1 for v in _CACHE.values() if v[1] is None and not v[2])
+    logger.info(
+        f"min_deposit warm-cache done: {len(vaults)} vaults in {time.time() - started:.1f}s "
+        f"(explicit={explicit}, no_min={no_min}, unknown={unknown})"
+    )
 
 
 def _safe_resolve(v: dict) -> None:

@@ -294,15 +294,20 @@ async def build_transaction(req: BuildRequest, request: Request):
 
     cc_quote = None
     if not force_two_step:
-        to_amount, _ = lifi.extract_quote_amounts(lifi_quote)
+        to_amount, to_amount_min = lifi.extract_quote_amounts(lifi_quote)
+        # Use to_amount_min for the on-router amount: bridges deliver between to_amount_min
+        # and to_amount, and our depositFor pulls exactly `amount` via transferFrom from the
+        # LiFi receiver. Encoding to_amount would revert (and LiFi would refund as PARTIAL)
+        # the moment any bridge fee or slippage shaves a wei off the optimistic to_amount.
+        cc_amount = to_amount_min if to_amount_min and int(to_amount_min) > 0 else to_amount
         cc_calldata = encode_deposit_for_calldata(
-            to_chain, vault["address"], to_token, int(to_amount),
+            to_chain, vault["address"], to_token, int(cc_amount),
             req.user_address, partner_id, partner_type, is_erc4626,
         )
         cc_quote = await lifi.get_contract_calls_quote(
             req.from_chain_id, req.from_token, req.from_amount,
             to_chain, to_token, req.user_address,
-            deposit_router, cc_calldata, to_amount,
+            deposit_router, cc_calldata, cc_amount,
             preferred_bridges=[bridge] if bridge else None,
             slippage=req.slippage,
         )
@@ -314,9 +319,12 @@ async def build_transaction(req: BuildRequest, request: Request):
             raise HTTPException(status_code=400, detail="No bridge route found")
         approval_target = tx_req.get("to", "")
 
-        to_amount, _ = lifi.extract_quote_amounts(lifi_quote)
+        to_amount, to_amount_min = lifi.extract_quote_amounts(lifi_quote)
+        # Conservative amount so the user's step-2 transferFrom succeeds even if the bridge
+        # delivered less than the optimistic to_amount.
+        dep_amount = to_amount_min if to_amount_min and int(to_amount_min) > 0 else to_amount
         dep_calldata = encode_deposit_for_calldata(
-            to_chain, vault["address"], to_token, int(to_amount),
+            to_chain, vault["address"], to_token, int(dep_amount),
             req.user_address, partner_id, partner_type, is_erc4626,
         )
 
@@ -351,7 +359,7 @@ async def build_transaction(req: BuildRequest, request: Request):
                 approval=ApprovalData(
                     token_address=to_token,
                     spender_address=deposit_router,
-                    amount=str(int(to_amount)),
+                    amount=str(int(dep_amount)),
                 ),
             ),
         )

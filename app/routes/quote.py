@@ -295,13 +295,19 @@ async def build_transaction(req: BuildRequest, request: Request):
     cc_quote = None
     if not force_two_step:
         to_amount, to_amount_min = lifi.extract_quote_amounts(lifi_quote)
-        # Use to_amount_min for the on-router amount: bridges deliver between to_amount_min
-        # and to_amount, and our depositFor pulls exactly `amount` via transferFrom from the
-        # LiFi receiver. Encoding to_amount would revert (and LiFi would refund as PARTIAL)
-        # the moment any bridge fee or slippage shaves a wei off the optimistic to_amount.
-        cc_amount = to_amount_min if to_amount_min and int(to_amount_min) > 0 else to_amount
+        # CRITICAL: LiFi's Executor sets `_swapData.fromAmount` to the *actual* bridge delivery
+        # but does NOT patch our calldata's `amount` parameter. Our depositFor calls
+        # transferFrom(Executor, Router, amount) — if amount > actual delivery the call
+        # reverts and LiFi refunds as PARTIAL. LiFi's quoted `toAmountMin` is unreliable for
+        # this — Across in particular often reports toAmountMin == toAmount even though actual
+        # delivery is 0.3-0.7% lower due to relayer fees. We apply a fixed 2% buffer below
+        # LiFi's optimistic to_amount; any dust left on Executor is swept back to the user
+        # by LiFi's tx-end refund logic.
+        COMPOSER_BUFFER_BPS = 200  # 2.00% — covers Across LP + relayer fee + small slip
+        safe_amount = int(int(to_amount) * (10000 - COMPOSER_BUFFER_BPS) // 10000)
+        cc_amount = str(safe_amount)
         cc_calldata = encode_deposit_for_calldata(
-            to_chain, vault["address"], to_token, int(cc_amount),
+            to_chain, vault["address"], to_token, safe_amount,
             req.user_address, partner_id, partner_type, is_erc4626,
         )
         cc_quote = await lifi.get_contract_calls_quote(

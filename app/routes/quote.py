@@ -299,21 +299,28 @@ async def build_transaction(req: BuildRequest, request: Request):
     cc_quote = None
     if not force_two_step:
         to_amount, _ = lifi.extract_quote_amounts(lifi_quote)
-        # V3.2.0+ uses depositForAvailable: the router pulls min(allowance, balance) from
-        # msg.sender, so any bridge fee underflow is handled cleanly without calldata
-        # amount mismatch. LiFi's Executor approves us for the exact post-bridge amount
-        # before invoking, so this naturally consumes whatever was delivered.
+        # Two layers of safety:
+        #
+        # 1. depositForAvailable (V3.2.0+) — router pulls min(allowance, balance) from
+        #    msg.sender. Eliminates calldata-amount mismatch entirely.
+        # 2. contractCalls.fromAmount we hint to LiFi must be <= actual bridge delivery.
+        #    LiFi's Executor reverts InsufficientBalance in LibSwap.swap if its accounted
+        #    fromAmount exceeds Executor's balance. Across has been observed to underdeliver
+        #    by 1 wei vs. LiFi's expectation, so we use a 2% buffer here just to drive the
+        #    SwapData.fromAmount safely below any plausible delivery. Whatever LiFi
+        #    "leaves on the table" stays as Executor balance and our depositForAvailable
+        #    sweeps it via the allowance/balance check.
+        SWAP_HINT_BUFFER_BPS = 200  # 2.00%
+        cc_amount = int(int(to_amount) * (10000 - SWAP_HINT_BUFFER_BPS) // 10000)
         cc_calldata = encode_deposit_for_available_calldata(
             to_chain, vault["address"], to_token,
             req.user_address, partner_id, partner_type, is_erc4626,
             min_amount=0, min_shares_out=0,
         )
-        # Hint LiFi with the optimistic to_amount so its swap planning works; the actual
-        # consumed amount is decided on-chain by the router, not by this number.
         cc_quote = await lifi.get_contract_calls_quote(
             req.from_chain_id, req.from_token, req.from_amount,
             to_chain, to_token, req.user_address,
-            deposit_router, cc_calldata, str(to_amount),
+            deposit_router, cc_calldata, str(cc_amount),
             preferred_bridges=[bridge] if bridge else None,
             slippage=req.slippage,
         )

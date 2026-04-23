@@ -78,6 +78,9 @@ def get_vault_response(vault_id: str) -> VaultResponse | None:
 
 
 def _to_response(v: dict) -> VaultResponse:
+    # Local import — keeps import graph acyclic (min_deposit imports rpc which uses constants)
+    from app.services import min_deposit as _min_deposit
+    resolved_min, no_min = _min_deposit.resolve(v)
     return VaultResponse(
         vault_id=v["vault_id"],
         name=v["name"],
@@ -91,5 +94,6 @@ def _to_response(v: dict) -> VaultResponse:
         ),
         deposit_router=v["deposit_router"],
         type=v.get("type", "morpho"),
-        min_deposit=v.get("min_deposit"),
+        min_deposit=str(resolved_min) if resolved_min is not None else None,
+        no_minimum=no_min,
     )

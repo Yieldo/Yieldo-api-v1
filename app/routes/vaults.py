@@ -42,6 +42,8 @@ async def get_vault_detail(vault_id: str):
         total_supply = None
         share_price = None
 
+    from app.services import min_deposit as _min_deposit
+    resolved_min, no_min = _min_deposit.resolve(v)
     return VaultDetailResponse(
         vault_id=v["vault_id"],
         name=v["name"],
@@ -55,7 +57,8 @@ async def get_vault_detail(vault_id: str):
         },
         deposit_router=v["deposit_router"],
         type=v.get("type", "morpho"),
-        min_deposit=v.get("min_deposit"),
+        min_deposit=str(resolved_min) if resolved_min is not None else None,
+        no_minimum=no_min,
         total_assets=str(total_assets) if total_assets is not None else None,
         total_supply=str(total_supply) if total_supply is not None else None,
         share_price=share_price,

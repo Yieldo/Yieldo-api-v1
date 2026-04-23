@@ -25,6 +25,9 @@ class VaultResponse(BaseModel):
     deposit_router: str
     type: str = "morpho"
     min_deposit: Optional[str] = None
+    # True iff we have evidence (vault type + on-chain probe) that there is no
+    # enforced minimum. Distinct from `min_deposit == None` which means "unknown".
+    no_minimum: bool = False
 
 
 class VaultDetailResponse(VaultResponse):

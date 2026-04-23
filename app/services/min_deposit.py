@@ -176,10 +176,18 @@ def resolve(vault: dict) -> tuple[Optional[int], bool]:
     return min_amount, has_no_min
 
 
-def warm_cache(vaults: list[dict]) -> None:
-    """Optional: pre-resolve on startup to make first vault list response fast."""
-    for v in vaults:
-        try:
-            resolve(v)
-        except Exception:
-            pass
+def warm_cache(vaults: list[dict], max_workers: int = 16) -> None:
+    """Pre-resolve all vault minimums in parallel so the first /v1/vaults response
+    is fast. Called once on app startup. Failures are silently cached as None."""
+    from concurrent.futures import ThreadPoolExecutor
+    started = time.time()
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        list(pool.map(lambda v: _safe_resolve(v), vaults))
+    logger.info(f"min_deposit warm-cache done: {len(vaults)} vaults in {time.time() - started:.1f}s")
+
+
+def _safe_resolve(v: dict) -> None:
+    try:
+        resolve(v)
+    except Exception:
+        pass

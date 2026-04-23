@@ -2,14 +2,23 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import vaults, quote, status, info, partners, kols, deposits, users, withdraw, positions
-from app.services.vault import load_vaults
-from app.services import database
+from app.services.vault import load_vaults, get_all_vaults_raw
+from app.services import database, min_deposit
 from app.config import get_settings
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_vaults()
+    # Warm the per-vault min-deposit cache in parallel so the first /v1/vaults
+    # response doesn't pay the 87-RPC cold-start. Runs in a background thread
+    # so it doesn't block startup if RPCs are slow.
+    import threading
+    threading.Thread(
+        target=min_deposit.warm_cache,
+        args=(get_all_vaults_raw(),),
+        daemon=True,
+    ).start()
     settings = get_settings()
     if settings.mongodb_url:
         await database.connect(settings.mongodb_url)

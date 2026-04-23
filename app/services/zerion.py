@@ -126,7 +126,8 @@ async def fetch_positions(wallet_address: str) -> Optional[list[dict]]:
                 params={
                     "filter[trash]": "only_non_trash",
                     "currency": "usd",
-                    "page[size]": 100,
+                    "page[size]": 250,  # Zerion max — covers wallets with many holdings
+                    "sort": "value",
                 },
                 headers={
                     "Authorization": _auth_header(settings.zerion_api_key),
@@ -156,34 +157,43 @@ async def fetch_positions(wallet_address: str) -> Optional[list[dict]]:
 def _normalize(items: list[dict]) -> list[dict]:
     """Reduce Zerion's verbose JSON:API response to a flat list of positions.
 
-    Zerion response shape (observed):
-      - item["id"] = "<chain>-<asset_id>" e.g. "base-ethereum-asset-asset" or "ethereum-morpho-<vault>"
-      - item["attributes"]["position_type"] = "wallet" | "deposit" | "staked" | ...
-      - item["attributes"]["protocol"] = protocol slug when it's a DeFi position
-      - item["attributes"]["fungible_info"]["implementations"] = per-chain contract addresses
-      - item["attributes"]["application_metadata"]["name"] = protocol display name
+    Zerion ID formats vary:
+      - `<chain>-asset-asset` (raw token holdings)
+      - `position-deposit-<protocol>-<chain>-<addr>-...` (DeFi deposits — what we want)
+      - `position-staked-<protocol>-<chain>-...` (LSTs, staking)
+      - `position-loan-<protocol>-<chain>-...` (debt)
+    The canonical chain reference is `relationships.chain.data.id`. Falling back to
+    `attributes.fungible_info.implementations[*].chain_id` if that's missing.
     """
     out = []
     for item in items:
         attrs = item.get("attributes", {}) or {}
-        item_id = item.get("id", "") or ""
+        rels = item.get("relationships", {}) or {}
 
-        # Derive chain from id's first segment (most reliable)
-        zerion_chain = item_id.split("-", 1)[0] if item_id else ""
-        evm_chain_id = _ZERION_TO_EVM_CHAIN.get(zerion_chain)
-        if not evm_chain_id:
-            continue
+        # Canonical chain — relationships.chain.data.id is the cleanest
+        zerion_chain = ((rels.get("chain") or {}).get("data") or {}).get("id") or ""
 
-        # Token contract address for this chain
+        # Token contract address — pick the implementation matching this chain
         fungible_info = attrs.get("fungible_info", {}) or {}
         implementations = fungible_info.get("implementations", []) or []
         token_address = None
         for impl in implementations:
-            if impl.get("chain_id") == zerion_chain:
+            impl_chain = impl.get("chain_id")
+            if zerion_chain and impl_chain == zerion_chain:
                 addr = impl.get("address")
                 if addr:
                     token_address = addr.lower()
                 break
+
+        # Last-ditch fallback: take the first implementation address + its chain
+        if not zerion_chain and implementations:
+            zerion_chain = implementations[0].get("chain_id") or ""
+            addr = implementations[0].get("address")
+            token_address = addr.lower() if addr else token_address
+
+        evm_chain_id = _ZERION_TO_EVM_CHAIN.get(zerion_chain)
+        if not evm_chain_id:
+            continue
         if not token_address:
             continue  # native ETH or missing contract — skip, not a vault
 
@@ -195,16 +205,15 @@ def _normalize(items: list[dict]) -> list[dict]:
         if quantity <= 0:
             continue
 
-        # Protocol attribution
+        # Protocol attribution (informational — used for display only, NOT for filtering).
+        # Many Morpho vaults aren't registered with Zerion as a "protocol position" so they
+        # appear with position_type=wallet, protocol=None. We rely on the caller to match
+        # the (chain_id, token_address) against the Yieldo vault list — if it matches a
+        # vault we know about, it's a position regardless of how Zerion classifies it.
         protocol_slug = (attrs.get("protocol") or "").lower()
         app_metadata = attrs.get("application_metadata") or {}
         protocol_name = (app_metadata.get("name") or "").lower()
         position_type = attrs.get("position_type", "wallet")
-
-        # Keep only protocol-attributed positions (yield-bearing). Skip raw token holdings.
-        is_protocol_position = bool(protocol_slug or protocol_name) and position_type != "wallet"
-        if not is_protocol_position:
-            continue
 
         out.append({
             "chain_id": evm_chain_id,

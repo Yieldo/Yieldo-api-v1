@@ -20,6 +20,34 @@ def _shares_from_quantity(quantity: float, share_decimals: int = 18) -> int:
     return int(quantity * (10 ** share_decimals))
 
 
+# Stablecoins that are 1:1 USD-pegged for value-display purposes. Used as a fallback
+# when Zerion doesn't have a USD price for a vault's share token (common for newer
+# Morpho vaults).
+_STABLE_SYMBOLS = {
+    "usdc", "usdt", "dai", "usds", "usdtb", "usdt0", "pyusd", "usde", "susd",
+    "usdc.e", "usdbc", "frax", "lusd", "crvusd", "ousd",
+}
+
+
+def _is_stable(symbol: str | None) -> bool:
+    return bool(symbol) and symbol.lower() in _STABLE_SYMBOLS
+
+
+def _usd_fallback(asset_symbol: str | None, current_assets: int | None, asset_decimals: int) -> float | None:
+    """Compute a USD value when Zerion didn't provide one. For stablecoins, 1:1."""
+    if current_assets is None or asset_decimals is None:
+        return None
+    if _is_stable(asset_symbol):
+        return current_assets / (10 ** asset_decimals)
+    return None
+
+
+# Hide positions worth less than this many USD (or asset units when we can't price them).
+# Prevents dust rows from cluttering the portfolio.
+_DUST_THRESHOLD_USD = 0.01
+_DUST_THRESHOLD_ASSET = 1e-6
+
+
 @router.get("/{user_address}", response_model=PositionsResponse)
 async def get_positions(user_address: str, chain_id: int | None = Query(None)):
     """Read user's vault positions with current value + historical deposited amount.
@@ -78,6 +106,17 @@ async def get_positions(user_address: str, chain_id: int | None = Query(None)):
             if current_assets is not None and dep_amt is not None:
                 yield_amt = current_assets - dep_amt
 
+            value_usd = zp.get("value_usd")
+            if value_usd is None:
+                value_usd = _usd_fallback(v.get("asset_symbol"), current_assets, asset_decimals)
+
+            # Skip dust
+            if value_usd is not None and value_usd < _DUST_THRESHOLD_USD:
+                continue
+            if value_usd is None and current_assets is not None:
+                if (current_assets / (10 ** asset_decimals)) < _DUST_THRESHOLD_ASSET:
+                    continue
+
             out.append(Position(
                 vault_id=v["vault_id"],
                 vault_name=v["name"],
@@ -92,7 +131,7 @@ async def get_positions(user_address: str, chain_id: int | None = Query(None)):
                 current_assets=str(current_assets) if current_assets is not None else None,
                 deposited_assets=str(dep_amt) if dep_amt is not None else None,
                 yield_assets=str(yield_amt) if yield_amt is not None else None,
-                value_usd=zp.get("value_usd"),
+                value_usd=value_usd,
                 apy=zp.get("apy"),
                 source="zerion",
             ))
@@ -137,6 +176,14 @@ async def get_positions(user_address: str, chain_id: int | None = Query(None)):
         if current_assets is not None and dep_amt is not None:
             yield_amt = current_assets - dep_amt
 
+        asset_dec = v.get("asset_decimals", 18)
+        value_usd = _usd_fallback(v.get("asset_symbol"), current_assets, asset_dec)
+        if value_usd is not None and value_usd < _DUST_THRESHOLD_USD:
+            continue
+        if value_usd is None and current_assets is not None:
+            if (current_assets / (10 ** asset_dec)) < _DUST_THRESHOLD_ASSET:
+                continue
+
         out.append(Position(
             vault_id=v["vault_id"],
             vault_name=v["name"],
@@ -144,14 +191,14 @@ async def get_positions(user_address: str, chain_id: int | None = Query(None)):
             chain_id=v["chain_id"],
             asset_symbol=v.get("asset_symbol", "").upper(),
             asset_address=v.get("asset_address", ""),
-            asset_decimals=v.get("asset_decimals", 18),
+            asset_decimals=asset_dec,
             share_balance=str(bal),
             share_decimals=18,
             vault_type=v.get("type", "morpho"),
             current_assets=str(current_assets) if current_assets is not None else None,
             deposited_assets=str(dep_amt) if dep_amt is not None else None,
             yield_assets=str(yield_amt) if yield_amt is not None else None,
-            value_usd=None,
+            value_usd=value_usd,
             apy=None,
             source="rpc",
         ))

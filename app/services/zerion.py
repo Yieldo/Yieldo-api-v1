@@ -215,13 +215,23 @@ def _normalize(items: list[dict]) -> list[dict]:
         protocol_name = (app_metadata.get("name") or "").lower()
         position_type = attrs.get("position_type", "wallet")
 
+        # Zerion returns null `value` for tokens it doesn't have a price for
+        # (most curated vault share tokens). Keep null distinct from 0 so the API
+        # can compute a USD fallback (e.g. stablecoin 1:1) before responding.
+        raw_value = attrs.get("value")
+        value_usd: float | None
+        try:
+            value_usd = float(raw_value) if raw_value is not None else None
+        except (TypeError, ValueError):
+            value_usd = None
+
         out.append({
             "chain_id": evm_chain_id,
             "protocol": protocol_slug or protocol_name,
             "token_address": token_address,
             "token_symbol": fungible_info.get("symbol", ""),
             "quantity": quantity,
-            "value_usd": float(attrs.get("value") or 0.0),
+            "value_usd": value_usd,
             "apy": _extract_apy(attrs),
             "position_type": position_type,
         })

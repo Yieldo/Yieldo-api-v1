@@ -28,6 +28,13 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning(f"ref_code backfill failed: {e}")
+        # Seed user docs for historical depositors who never did SIWE login,
+        # so every address in `transactions` has a matching `users` row.
+        try:
+            await database.backfill_users_from_transactions()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"users-from-txs backfill failed: {e}")
     yield
     await database.disconnect()
 

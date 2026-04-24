@@ -880,6 +880,54 @@ async def backfill_user_ref_codes() -> int:
     return updated
 
 
+async def backfill_users_from_transactions() -> int:
+    """Seed a `users` row for every historical depositor that doesn't have one.
+
+    Preserves deposit history (no transactions are deleted). Each seeded row
+    gets `created_at = earliest transaction for that address`, `status = active`,
+    `login_count = 0`, no `last_login` (they never signed in — they'll get one
+    the next time they go through SIWE). Also assigns a `ref_code`.
+    """
+    if _db is None:
+        return 0
+    seeded = 0
+    # Distinct non-null deposit addresses
+    addresses = await _db["transactions"].distinct(
+        "user_address",
+        {"user_address": {"$nin": [None, ""]}},
+    )
+    for addr in addresses:
+        if not addr:
+            continue
+        addr = addr.lower()
+        existing = await _db["users"].find_one({"address": addr}, {"_id": 1})
+        if existing:
+            continue
+        earliest = await _db["transactions"].find_one(
+            {"user_address": addr},
+            {"created_at": 1},
+            sort=[("created_at", 1)],
+        )
+        created_at = (earliest or {}).get("created_at") or datetime.now(timezone.utc)
+        doc = {
+            "address": addr,
+            "status": "active",
+            "created_at": created_at,
+            "login_count": 0,
+            "ref_code": await _new_unique_ref_code(),
+            "seeded_from_transactions": True,
+        }
+        try:
+            await _db["users"].insert_one(doc)
+            seeded += 1
+        except Exception as e:
+            # Likely a race with get_or_create_user — ignore
+            logger.debug(f"seed user {addr} skipped: {e}")
+    if seeded:
+        logger.info(f"backfill_users_from_transactions: seeded {seeded} users")
+    return seeded
+
+
 async def _new_unique_ref_code() -> str:
     # Retries on the vanishingly rare collision; the unique index is authoritative.
     for _ in range(10):

@@ -11,6 +11,11 @@ _LIFI_STATUS_MAP = {
     "NOT_FOUND": "submitted",
 }
 
+# When LiFi reports DONE but with these substatuses, treat as partial — bridge
+# delivered but the destination action (swap/deposit) didn't complete and the
+# user got refunded the source asset on the destination chain.
+_LIFI_PARTIAL_SUBSTATUSES = {"PARTIAL", "REFUNDED"}
+
 router = APIRouter(prefix="/v1", tags=["status"])
 
 
@@ -61,6 +66,16 @@ async def get_transfer_status(
     extra = {"lifi_explorer": lifi_explorer}
     if bridge:
         extra["bridge"] = bridge
+    # Detect partial / refunded on the destination chain. We expose the dest tx
+    # hash + actually-received token+amount so the HistoryPage can show what the
+    # user got back, instead of leaving them guessing.
+    if status == "DONE" and substatus in _LIFI_PARTIAL_SUBSTATUSES:
+        db_status = "partial"
+        if r:
+            extra["dest_tx_hash"] = r.get("txHash")
+            extra["dest_chain_id"] = to_chain_id
+            extra["received_token"] = (r.get("token") or {}).get("address")
+            extra["received_amount"] = r.get("amount")
     await database.update_transaction_status(tx_hash, from_chain_id, db_status, extra_fields=extra)
 
     return StatusResponse(

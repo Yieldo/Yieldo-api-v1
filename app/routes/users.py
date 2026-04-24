@@ -108,8 +108,18 @@ async def get_referrals(address: str):
     """Return referral stats + tier for an investor's own referral link.
 
     Counts UNIQUE user_addresses that deposited where referrer matches this address.
+    Also lazily provisions (or returns) the user's random `ref_code`.
     """
     addr = address.lower()
+
+    # Provision ref_code if this user has a row but no code yet. If the user
+    # has never logged in, seed a minimal row so they still get a shareable code.
+    ref_code = await database.ensure_user_ref_code(addr)
+    if not ref_code:
+        user = await database.get_user_by_address(addr)
+        if not user:
+            await database.get_or_create_user(addr)
+        ref_code = await database.ensure_user_ref_code(addr)
 
     depositing = await database.count_unique_depositing_referrals(addr)
     # For clicks/signups we don't track yet — return 0. Frontend can show as 0.
@@ -130,6 +140,7 @@ async def get_referrals(address: str):
 
     return {
         "address": addr,
+        "ref_code": ref_code,
         "clicks": clicks,
         "signups": signups,
         "depositing": depositing,
@@ -140,6 +151,22 @@ async def get_referrals(address: str):
         "tier2_threshold": _TIER2_THRESHOLD,
         "creator_unlocked": depositing >= _TIER2_THRESHOLD,
     }
+
+
+@router.get("/resolve-ref/{code}")
+async def resolve_ref(code: str):
+    """Resolve a random user referral code to its owner address.
+
+    Used by the deposit modal to attribute a deposit to the referrer when a
+    visitor lands with `?ref=<code>` that is not a registered Creator handle.
+    """
+    code_norm = code.strip().upper()
+    if not code_norm:
+        raise HTTPException(status_code=400, detail="Empty code")
+    user = await database.get_user_by_ref_code(code_norm)
+    if not user:
+        raise HTTPException(status_code=404, detail="Referral code not found")
+    return {"address": user["address"], "ref_code": user.get("ref_code", code_norm)}
 
 
 @router.post("/logout")

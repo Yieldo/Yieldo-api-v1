@@ -1,9 +1,18 @@
 import logging
+import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorClient
+
+# Alphabet for user referral codes — skips visually ambiguous chars (0/O, 1/l/I).
+_REF_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+_REF_LEN = 8
+
+
+def _gen_ref_code() -> str:
+    return "".join(secrets.choice(_REF_ALPHABET) for _ in range(_REF_LEN))
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +110,11 @@ async def _ensure_indexes():
         # User indexes
         users = _db["users"]
         await users.create_index("address", unique=True)
+        await users.create_index(
+            "ref_code",
+            unique=True,
+            partialFilterExpression={"ref_code": {"$type": "string"}},
+        )
 
         user_nonces = _db["user_nonces"]
         await user_nonces.create_index("address")
@@ -790,21 +804,76 @@ async def get_or_create_user(address: str) -> dict:
             {"$set": {"last_login": now}},
         )
         existing["last_login"] = now
+        if not existing.get("ref_code"):
+            code = await _assign_ref_code(addr)
+            if code:
+                existing["ref_code"] = code
         return existing
     doc = {
         "address": addr,
         "status": "active",
         "created_at": now,
         "last_login": now,
+        "ref_code": await _new_unique_ref_code(),
     }
     await _db["users"].insert_one(doc)
     return doc
+
+
+async def _new_unique_ref_code() -> str:
+    # Retries on the vanishingly rare collision; the unique index is authoritative.
+    for _ in range(10):
+        code = _gen_ref_code()
+        if _db is None or await _db["users"].find_one({"ref_code": code}) is None:
+            return code
+    return _gen_ref_code()
+
+
+async def _assign_ref_code(addr: str) -> Optional[str]:
+    """Lazily assign a ref_code to an existing user that doesn't have one yet."""
+    if _db is None:
+        return None
+    for _ in range(10):
+        code = _gen_ref_code()
+        try:
+            res = await _db["users"].update_one(
+                {"address": addr, "ref_code": {"$in": [None, ""]}},
+                {"$set": {"ref_code": code}},
+            )
+            if res.matched_count == 0:
+                doc = await _db["users"].find_one({"address": addr})
+                return doc.get("ref_code") if doc else None
+            if res.modified_count == 1:
+                return code
+        except Exception:
+            # Duplicate key — collision, retry with a new code
+            continue
+    return None
 
 
 async def get_user_by_address(address: str) -> Optional[dict]:
     if _db is None:
         return None
     return await _db["users"].find_one({"address": address.lower()})
+
+
+async def get_user_by_ref_code(code: str) -> Optional[dict]:
+    if _db is None or not code:
+        return None
+    return await _db["users"].find_one({"ref_code": code.upper()})
+
+
+async def ensure_user_ref_code(address: str) -> Optional[str]:
+    """Public helper — returns the user's ref_code, creating one if missing."""
+    if _db is None:
+        return None
+    addr = address.lower()
+    doc = await _db["users"].find_one({"address": addr})
+    if not doc:
+        return None
+    if doc.get("ref_code"):
+        return doc["ref_code"]
+    return await _assign_ref_code(addr)
 
 
 async def save_user_session(token_hash: str, address: str, expires_at: datetime) -> None:

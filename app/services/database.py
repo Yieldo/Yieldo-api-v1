@@ -124,6 +124,10 @@ async def _ensure_indexes():
         await user_sessions.create_index("token_hash")
         await user_sessions.create_index("expires_at", expireAfterSeconds=0)
 
+        user_logins = _db["user_logins"]
+        await user_logins.create_index([("address", 1), ("created_at", -1)])
+        await user_logins.create_index("created_at")
+
     except Exception as e:
         logger.error(f"MongoDB index creation failed: {e}")
 
@@ -792,7 +796,11 @@ async def get_and_delete_user_nonce(address: str) -> Optional[str]:
 
 
 async def get_or_create_user(address: str) -> dict:
-    """Auto-register user on first login, or return existing."""
+    """Auto-register user on first login, or return existing.
+
+    Also records the login event in `user_logins` and bumps `login_count` so
+    we have a per-user auth history instead of just the latest timestamp.
+    """
     if _db is None:
         return {}
     addr = address.lower()
@@ -801,23 +809,75 @@ async def get_or_create_user(address: str) -> dict:
     if existing:
         await _db["users"].update_one(
             {"address": addr},
-            {"$set": {"last_login": now}},
+            {
+                "$set": {"last_login": now},
+                "$inc": {"login_count": 1},
+            },
         )
         existing["last_login"] = now
+        existing["login_count"] = (existing.get("login_count") or 0) + 1
         if not existing.get("ref_code"):
             code = await _assign_ref_code(addr)
             if code:
                 existing["ref_code"] = code
+        await _record_login(addr, now, first_login=False)
         return existing
     doc = {
         "address": addr,
         "status": "active",
         "created_at": now,
         "last_login": now,
+        "login_count": 1,
         "ref_code": await _new_unique_ref_code(),
     }
     await _db["users"].insert_one(doc)
+    await _record_login(addr, now, first_login=True)
     return doc
+
+
+async def _record_login(addr: str, at: datetime, first_login: bool) -> None:
+    if _db is None:
+        return
+    try:
+        await _db["user_logins"].insert_one({
+            "address": addr,
+            "created_at": at,
+            "first_login": first_login,
+        })
+    except Exception as e:
+        logger.warning(f"user_logins insert failed for {addr}: {e}")
+
+
+async def get_user_login_history(address: str, limit: int = 50) -> list[dict]:
+    if _db is None:
+        return []
+    cursor = _db["user_logins"].find(
+        {"address": address.lower()},
+        {"_id": 0},
+    ).sort("created_at", -1).limit(limit)
+    return [d async for d in cursor]
+
+
+async def backfill_user_ref_codes() -> int:
+    """Assign ref_codes to any existing users that don't have one yet.
+    Returns number of users updated. Safe to run repeatedly."""
+    if _db is None:
+        return 0
+    updated = 0
+    cursor = _db["users"].find(
+        {"$or": [{"ref_code": {"$exists": False}}, {"ref_code": None}, {"ref_code": ""}]},
+        {"address": 1},
+    )
+    async for u in cursor:
+        addr = u.get("address")
+        if not addr:
+            continue
+        code = await _assign_ref_code(addr)
+        if code:
+            updated += 1
+    if updated:
+        logger.info(f"backfill_user_ref_codes: assigned codes to {updated} users")
+    return updated
 
 
 async def _new_unique_ref_code() -> str:

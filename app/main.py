@@ -22,6 +22,12 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     if settings.mongodb_url:
         await database.connect(settings.mongodb_url)
+        # Backfill ref_codes for any existing users that predate the feature.
+        try:
+            await database.backfill_user_ref_codes()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"ref_code backfill failed: {e}")
     yield
     await database.disconnect()
 

@@ -44,7 +44,7 @@ RPCS = {
     747474: "https://rpc.katana.network",
 }
 
-ABANDON_HOURS = 1   # records w/o tx_hash older than this -> abandoned
+ABANDON_HOURS = 24   # records w/o tx_hash older than this -> abandoned
 LIFI_STATUS_URL = "https://li.quest/v1/status"
 
 

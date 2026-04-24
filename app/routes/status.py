@@ -3,6 +3,7 @@ from app.models import StatusResponse, SendingInfo, ReceivingInfo
 from app.core.constants import CHAIN_CONFIG, DEPOSIT_ROUTER_ADDRESSES
 from app.services import lifi
 from app.services import database
+from app.services.rpc import get_w3
 
 _LIFI_STATUS_MAP = {
     "DONE": "completed",
@@ -26,12 +27,43 @@ def _tx_link(chain_id: int, tx_hash: str) -> str | None:
     return f"{cfg['explorer']}/tx/{tx_hash}"
 
 
+def _onchain_status(chain_id: int, tx_hash: str) -> str | None:
+    """Read the receipt for a tx and return 'completed' (status 0x1),
+    'failed' (0x0), or None if not yet mined / unreachable."""
+    try:
+        w3 = get_w3(chain_id)
+        receipt = w3.eth.get_transaction_receipt(tx_hash)
+        if receipt is None:
+            return None
+        # web3.py returns int 0/1 in `status`
+        return "completed" if int(receipt.get("status", 0)) == 1 else "failed"
+    except Exception:
+        return None
+
+
 @router.get("/status", response_model=StatusResponse)
 async def get_transfer_status(
     tx_hash: str = Query(..., description="Source chain transaction hash"),
     from_chain_id: int = Query(..., description="Source chain ID"),
     to_chain_id: int = Query(..., description="Destination chain ID"),
 ):
+    # Same-chain: skip LiFi entirely (it doesn't index non-LiFi same-chain txs
+    # and would just return PENDING/NOT_FOUND forever). Read the on-chain receipt.
+    if from_chain_id == to_chain_id:
+        oc = _onchain_status(from_chain_id, tx_hash)
+        cfg = CHAIN_CONFIG.get(from_chain_id, {})
+        link = f"{cfg.get('explorer','')}/tx/{tx_hash}" if cfg.get("explorer") else None
+        if oc:
+            await database.update_transaction_status(tx_hash, from_chain_id, oc,
+                extra_fields={"lifi_explorer": None})
+            return StatusResponse(
+                status="DONE" if oc == "completed" else "FAILED",
+                substatus="COMPLETED" if oc == "completed" else None,
+                sending=SendingInfo(tx_hash=tx_hash, tx_link=link, chain_id=from_chain_id) if link else None,
+                receiving=None, bridge=None, lifi_explorer=None,
+            )
+        return StatusResponse(status="PENDING", sending=None, receiving=None, bridge=None, lifi_explorer=None)
+
     data = await lifi.get_status(tx_hash, from_chain_id, to_chain_id)
     if not data:
         raise HTTPException(status_code=404, detail="Transaction not found")

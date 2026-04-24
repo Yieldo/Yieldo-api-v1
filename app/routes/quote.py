@@ -26,6 +26,7 @@ from app.services.rpc import (
 )
 from app.services import lifi
 from app.services import database
+from app.core.auth import hash_key
 from app.routes.partners import get_partner_from_api_key
 
 
@@ -220,11 +221,35 @@ async def get_quote(req: QuoteRequest, request: Request):
     return response
 
 
+async def _require_registered_user(request: Request, user_address: str) -> None:
+    """Enforce 'sign-in before action'. Accepts either:
+      - Valid partner API key (wallet integrations keep working), OR
+      - Valid SIWE user session whose address matches `user_address`.
+    Without one of these we reject — deposit-only, unregistered users are no
+    longer allowed to build transactions.
+    """
+    if await get_partner_from_api_key(request):
+        return
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Sign in required — please sign the wallet message to register before depositing")
+    session = await database.get_user_session(hash_key(auth[7:]))
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired — please sign in again")
+    if session["address"].lower() != user_address.lower():
+        raise HTTPException(status_code=403, detail="Session address does not match deposit address")
+    user = await database.get_user_by_address(session["address"])
+    if not user or user.get("status") != "active":
+        raise HTTPException(status_code=403, detail="Account inactive")
+
+
 @router.post("/build", response_model=BuildResponse)
 async def build_transaction(req: BuildRequest, request: Request):
     partner = await get_partner_from_api_key(request)
     if partner:
         req.referrer = partner.get("fee_collector_address", partner["address"])
+    else:
+        await _require_registered_user(request, req.user_address)
 
     vault = get_vault(req.vault_id)
     if not vault:

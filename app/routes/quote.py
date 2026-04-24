@@ -357,6 +357,12 @@ async def build_transaction(req: BuildRequest, request: Request):
             raise HTTPException(status_code=400, detail="No bridge route found")
         approval_target = tx_req.get("to", "")
 
+        # Use the LiFi quote's `estimate.fromAmount` (the GROSS input incl. integrator
+        # fee) for the approval, not req.from_amount. Otherwise allowance falls short
+        # of the Executor's transferFrom and the tx reverts with
+        # "transfer amount exceeds allowance".
+        approval_amount = str(lifi_quote.get("estimate", {}).get("fromAmount") or req.from_amount)
+
         to_amount, _ = lifi.extract_quote_amounts(lifi_quote)
         # Same buffer logic as composer: bridge delivery often lands below LiFi's quoted
         # toAmountMin. The user signs step-2 themselves with their own balance, so an
@@ -380,7 +386,7 @@ async def build_transaction(req: BuildRequest, request: Request):
             approval=None if _is_native_token(req.from_token) else ApprovalData(
                 token_address=req.from_token,
                 spender_address=approval_target,
-                amount=req.from_amount,
+                amount=approval_amount,
             ),
             tracking=TrackingInfo(
                 from_chain_id=req.from_chain_id,
@@ -408,6 +414,10 @@ async def build_transaction(req: BuildRequest, request: Request):
         tx_req = cc_quote["transactionRequest"]
         approval_target = tx_req.get("to", deposit_router)
         used_bridge = lifi.extract_bridge_from_quote(cc_quote)
+        # Same fix as the two-step branch: approve the GROSS amount LiFi will
+        # actually pull (Executor's Step 1 input), not just req.from_amount.
+        # Without this, integrator-fee routes revert at swapAndExecute.
+        approval_amount = str(cc_quote.get("estimate", {}).get("fromAmount") or req.from_amount)
 
         response = BuildResponse(
             transaction_request=TransactionRequest(
@@ -420,7 +430,7 @@ async def build_transaction(req: BuildRequest, request: Request):
             approval=None if _is_native_token(req.from_token) else ApprovalData(
                 token_address=req.from_token,
                 spender_address=approval_target,
-                amount=req.from_amount,
+                amount=approval_amount,
             ),
             tracking=TrackingInfo(
                 from_chain_id=req.from_chain_id,

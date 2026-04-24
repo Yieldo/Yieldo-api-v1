@@ -351,6 +351,71 @@ async def get_deposited_per_vault(user_address: str) -> dict[str, int]:
     return totals
 
 
+async def get_vault_success_stats(
+    vault_id: str,
+    days: int = 30,
+    from_chain_id: Optional[int] = None,
+    from_token: Optional[str] = None,
+) -> dict:
+    """Real success-rate from the transactions collection. Optional filters by
+    source chain + token. `completed` counts as success; everything else
+    (failed, partial, pending, submitted that never moved) counts as not-success.
+
+    Returns:
+      {
+        "vault_id": str,
+        "window_days": int,
+        "total":      int,
+        "completed":  int,
+        "success_rate": float (0-1),
+        "by_bridge":  [{"bridge": str, "total": int, "completed": int, "rate": float}, ...],
+      }
+    """
+    if _db is None:
+        return {"vault_id": vault_id, "window_days": days, "total": 0, "completed": 0,
+                "success_rate": None, "by_bridge": []}
+    from datetime import timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    base_match: dict = {"vault_id": vault_id, "created_at": {"$gte": cutoff}}
+    if from_chain_id is not None:
+        base_match["from_chain_id"] = from_chain_id
+    if from_token:
+        base_match["from_token"] = {"$regex": f"^{from_token}$", "$options": "i"}
+
+    pipeline = [
+        {"$match": base_match},
+        {"$group": {
+            "_id": {"bridge": {"$ifNull": ["$bridge", "direct"]}},
+            "total": {"$sum": 1},
+            "completed": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}},
+        }},
+        {"$sort": {"total": -1}},
+    ]
+    rows = [r async for r in _db["transactions"].aggregate(pipeline)]
+    by_bridge = []
+    total = 0
+    completed = 0
+    for r in rows:
+        t = r.get("total", 0)
+        c = r.get("completed", 0)
+        total += t
+        completed += c
+        by_bridge.append({
+            "bridge": r["_id"].get("bridge") or "direct",
+            "total": t,
+            "completed": c,
+            "rate": (c / t) if t else None,
+        })
+    return {
+        "vault_id": vault_id,
+        "window_days": days,
+        "total": total,
+        "completed": completed,
+        "success_rate": (completed / total) if total else None,
+        "by_bridge": by_bridge,
+    }
+
+
 async def count_unique_depositing_referrals(referrer_address: str) -> int:
     """Count distinct user_addresses that have deposited with the given referrer."""
     if _db is None:

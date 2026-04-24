@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from app.models import VaultResponse, VaultDetailResponse
 from app.services.vault import get_all_vaults, get_vault, get_vault_response
 from app.services.rpc import get_vault_share_price
+from app.services import database
 from app.routes.partners import get_partner_from_api_key
 
 router = APIRouter(prefix="/v1/vaults", tags=["vaults"])
@@ -59,7 +60,29 @@ async def get_vault_detail(vault_id: str):
         type=v.get("type", "morpho"),
         min_deposit=str(resolved_min) if resolved_min is not None else None,
         no_minimum=no_min,
+        curator=v.get("curator"),
         total_assets=str(total_assets) if total_assets is not None else None,
         total_supply=str(total_supply) if total_supply is not None else None,
         share_price=share_price,
+    )
+
+
+@router.get("/{vault_id}/stats")
+async def get_vault_stats(
+    vault_id: str,
+    days: int = Query(30, ge=1, le=365),
+    from_chain_id: int | None = Query(None, description="Filter by source chain"),
+    from_token: str | None = Query(None, description="Filter by source token address (case-insensitive)"),
+):
+    """Real success-rate stats from historical deposits, optionally filtered by
+    source chain + token. Returns overall + per-bridge breakdown so the deposit
+    UI can tag each route option with its observed success rate."""
+    v = get_vault(vault_id)
+    if not v:
+        raise HTTPException(status_code=404, detail=f"Vault {vault_id} not found")
+    return await database.get_vault_success_stats(
+        vault_id=vault_id,
+        days=days,
+        from_chain_id=from_chain_id,
+        from_token=from_token,
     )

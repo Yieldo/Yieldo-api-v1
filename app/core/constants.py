@@ -17,6 +17,49 @@ DEPOSIT_ROUTER_ADDRESSES: dict[int, str] = {
     999: "0xa682CD1c2Fd7c8545b401824096A600C2bD98F69",       # HyperEVM
 }
 
+# LiFi Diamond is the same address across chains. When LiFi's contractCalls
+# response returns `tx.to` matching the Diamond, the user's approval target IS
+# the Diamond (its GenericSwapFacet pulls tokens directly). When LiFi returns
+# anything else (almost always an Executor instance), the Executor pulls user
+# tokens via its ERC20Proxy, so the user must approve the Proxy not the Executor.
+# We resolve the Executor->Proxy mapping at runtime by calling Executor.erc20Proxy().
+LIFI_DIAMOND = "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE"
+
+# Cache of (chain_id, executor) -> proxy_address. Resolved on first need by
+# calling Executor.erc20Proxy() over RPC. Keys are lowercased.
+_LIFI_PROXY_CACHE: dict[tuple[int, str], str] = {}
+
+
+def lifi_approval_target(chain_id: int, lifi_target: str) -> str:
+    """Return the address the user must grant ERC20 allowance to. For LiFi
+    Diamond targets, that IS the Diamond. For Executor targets, it's the
+    Executor's ERC20Proxy (resolved on-chain, cached)."""
+    if not lifi_target:
+        return lifi_target
+    if lifi_target.lower() == LIFI_DIAMOND.lower():
+        return lifi_target
+    cache_key = (chain_id, lifi_target.lower())
+    cached = _LIFI_PROXY_CACHE.get(cache_key)
+    if cached:
+        return cached
+    # Lazy import to keep this module free of web3 at import-time.
+    try:
+        from app.services.rpc import get_w3
+        w3 = get_w3(chain_id)
+        c = w3.eth.contract(
+            address=w3.to_checksum_address(lifi_target),
+            abi=[{"inputs": [], "name": "erc20Proxy", "outputs": [{"type": "address"}],
+                  "stateMutability": "view", "type": "function"}],
+        )
+        proxy = c.functions.erc20Proxy().call()
+        _LIFI_PROXY_CACHE[cache_key] = proxy
+        return proxy
+    except Exception:
+        # If we can't resolve, fall back to the target itself — will revert,
+        # but at least surfaces the issue rather than silently approving wrong.
+        return lifi_target
+
+
 PYTH_CONTRACT_ADDRESSES: dict[int, str] = {
     1: "0x4305FB66699C3B2702D4d05CF36551390A4c69C6",
     8453: "0x8250f4aF4B972684F7b336503E2D6dFeDeB1487a",

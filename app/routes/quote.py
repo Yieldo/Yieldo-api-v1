@@ -17,6 +17,7 @@ from app.core.constants import (
     CROSS_CHAIN_SLIPPAGE_BUFFER,
     NON_COMPOSER_CROSS_CHAIN_BUFFER,
     DEPOSIT_ROUTER_ADDRESSES,
+    lifi_approval_target,
 )
 from app.services.vault import get_vault, get_vault_response
 from app.services.rpc import (
@@ -322,16 +323,6 @@ async def build_transaction(req: BuildRequest, request: Request):
     bridge = lifi.extract_bridge_from_quote(lifi_quote)
 
     cc_quote = None
-    # Same-chain swaps must NOT use the contractCalls/Executor path. LiFi returns
-    # `Executor.swapAndExecute(bytes32,SwapData[],address,address,uint256)` for that
-    # endpoint, which is designed for a bridge-receiver flow (Executor already holds
-    # the tokens after Across delivers). When a user calls it directly, the internal
-    # transferFrom routes through LiFi's ERC20Proxy, which has 0 allowance from the
-    # user — tx reverts with "ERC20: insufficient allowance". Forcing two-step here
-    # routes the swap through the Diamond's GenericSwapFacet (which pulls properly)
-    # and the user signs a separate deposit on our router.
-    if is_same_chain:
-        force_two_step = True
     if not force_two_step:
         to_amount, _ = lifi.extract_quote_amounts(lifi_quote)
         # Two layers of safety:
@@ -365,7 +356,10 @@ async def build_transaction(req: BuildRequest, request: Request):
         tx_req = lifi_quote.get("transactionRequest", {})
         if not tx_req:
             raise HTTPException(status_code=400, detail="No bridge route found")
-        approval_target = tx_req.get("to", "")
+        # If LiFi targets the Diamond, allowance goes to Diamond. If LiFi targets
+        # an Executor, the user must approve its ERC20Proxy instead — Executor's
+        # entry methods all pull via that proxy. lifi_approval_target() handles both.
+        approval_target = lifi_approval_target(req.from_chain_id, tx_req.get("to", ""))
 
         # Use the LiFi quote's `estimate.fromAmount` (the GROSS input incl. integrator
         # fee) for the approval, not req.from_amount. Otherwise allowance falls short
@@ -422,11 +416,11 @@ async def build_transaction(req: BuildRequest, request: Request):
         )
     else:
         tx_req = cc_quote["transactionRequest"]
-        approval_target = tx_req.get("to", deposit_router)
+        # See comment above: same Diamond-vs-Executor distinction applies to the
+        # composer path. Most chains will return Executor here; the user must
+        # approve the chain's ERC20Proxy.
+        approval_target = lifi_approval_target(req.from_chain_id, tx_req.get("to", deposit_router))
         used_bridge = lifi.extract_bridge_from_quote(cc_quote)
-        # Same fix as the two-step branch: approve the GROSS amount LiFi will
-        # actually pull (Executor's Step 1 input), not just req.from_amount.
-        # Without this, integrator-fee routes revert at swapAndExecute.
         approval_amount = str(cc_quote.get("estimate", {}).get("fromAmount") or req.from_amount)
 
         response = BuildResponse(

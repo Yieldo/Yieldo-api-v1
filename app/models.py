@@ -28,6 +28,9 @@ class VaultResponse(BaseModel):
     # True iff we have evidence (vault type + on-chain probe) that there is no
     # enforced minimum. Distinct from `min_deposit == None` which means "unknown".
     no_minimum: bool = False
+    # Curator label override — used for vaults not covered by Morpho's API
+    # (e.g. Veda / Ether.fi). None = let frontend fall back to its usual source.
+    curator: Optional[str] = None
 
 
 class VaultDetailResponse(VaultResponse):

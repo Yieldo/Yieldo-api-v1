@@ -55,6 +55,7 @@ def load_vaults():
             "deposit_router": DEPOSIT_ROUTER_ADDRESSES[chain_id],
             "type": v.get("type", "morpho"),
             "min_deposit": v.get("min_deposit"),
+            "curator": v.get("curator"),
         }
 
 
@@ -96,4 +97,5 @@ def _to_response(v: dict) -> VaultResponse:
         type=v.get("type", "morpho"),
         min_deposit=str(resolved_min) if resolved_min is not None else None,
         no_minimum=no_min,
+        curator=v.get("curator"),
     )

@@ -322,6 +322,16 @@ async def build_transaction(req: BuildRequest, request: Request):
     bridge = lifi.extract_bridge_from_quote(lifi_quote)
 
     cc_quote = None
+    # Same-chain swaps must NOT use the contractCalls/Executor path. LiFi returns
+    # `Executor.swapAndExecute(bytes32,SwapData[],address,address,uint256)` for that
+    # endpoint, which is designed for a bridge-receiver flow (Executor already holds
+    # the tokens after Across delivers). When a user calls it directly, the internal
+    # transferFrom routes through LiFi's ERC20Proxy, which has 0 allowance from the
+    # user — tx reverts with "ERC20: insufficient allowance". Forcing two-step here
+    # routes the swap through the Diamond's GenericSwapFacet (which pulls properly)
+    # and the user signs a separate deposit on our router.
+    if is_same_chain:
+        force_two_step = True
     if not force_two_step:
         to_amount, _ = lifi.extract_quote_amounts(lifi_quote)
         # Two layers of safety:

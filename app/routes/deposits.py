@@ -1,10 +1,16 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Query
+from bson import ObjectId
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 from app.services import database
 from app.core.constants import CHAIN_CONFIG
 
 router = APIRouter(prefix="/v1/deposits", tags=["deposits"])
+
+
+class DepositTxReport(BaseModel):
+    tx_hash: str
 
 
 @router.get("")
@@ -33,6 +39,24 @@ async def get_user_deposits(
         d["from_chain_name"] = cfg.get("name", "")
         d["to_chain_name"] = to_cfg.get("name", "")
     return deposits
+
+
+@router.patch("/{tracking_id}/tx")
+async def report_deposit_tx(tracking_id: str, body: DepositTxReport):
+    """Report the actual on-chain tx hash for a previously-built deposit.
+    Closes the loop between /v1/quote/build (which saves the request before the
+    tx exists) and /v1/status (which needs a tx_hash to fetch LiFi state).
+    Without this, transactions stay `pending` forever in HistoryPage."""
+    if not body.tx_hash:
+        raise HTTPException(status_code=400, detail="tx_hash required")
+    try:
+        oid = ObjectId(tracking_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid tracking_id")
+    res = await database.set_transaction_tx_hash(oid, body.tx_hash)
+    if not res:
+        raise HTTPException(status_code=404, detail="Tracking record not found")
+    return {"ok": True, "tracking_id": tracking_id, "tx_hash": body.tx_hash}
 
 
 @router.get("/summary")

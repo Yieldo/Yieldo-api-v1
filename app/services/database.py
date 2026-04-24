@@ -164,17 +164,22 @@ async def save_transaction(
     try:
         now = datetime.now(timezone.utc)
         tracking = response_dict.get("tracking", {})
+        # Normalize user_address to lowercase at write-time so all reads (which
+        # consistently lowercase the query) actually match. Without this, txs
+        # written with the user's checksummed address never appear in their
+        # /v1/deposits or HistoryPage results.
+        ua = request_dict.get("user_address") or ""
         doc = {
             "request": request_dict,
             "response": response_dict,
-            "user_address": request_dict.get("user_address"),
+            "user_address": ua.lower(),
             "vault_id": request_dict.get("vault_id"),
             "vault_name": vault_name,
             "from_chain_id": request_dict.get("from_chain_id"),
             "to_chain_id": tracking.get("to_chain_id"),
-            "from_token": request_dict.get("from_token"),
+            "from_token": (request_dict.get("from_token") or "").lower(),
             "from_amount": request_dict.get("from_amount"),
-            "referrer": referrer or request_dict.get("referrer", ""),
+            "referrer": (referrer or request_dict.get("referrer", "") or "").lower(),
             "referrer_handle": referrer_handle,
             "quote_type": quote_type,
             "status": "pending",
@@ -190,6 +195,23 @@ async def save_transaction(
     except Exception as e:
         logger.error(f"Failed to save transaction: {e}")
         return None
+
+
+async def set_transaction_tx_hash(tracking_oid, tx_hash: str) -> bool:
+    """Attach the on-chain tx_hash to a previously-built tracking record.
+    Called by `/v1/deposits/{tracking_id}/tx` once the user signs and broadcasts.
+    Status moves pending -> submitted so the polling loop picks it up."""
+    if _db is None:
+        return False
+    now = datetime.now(timezone.utc)
+    res = await _db["transactions"].update_one(
+        {"_id": tracking_oid},
+        {
+            "$set": {"tx_hash": tx_hash, "status": "submitted", "updated_at": now},
+            "$push": {"status_history": {"status": "submitted", "timestamp": now, "tx_hash": tx_hash}},
+        },
+    )
+    return res.matched_count > 0
 
 
 async def update_transaction_status(

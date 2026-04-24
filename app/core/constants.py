@@ -81,10 +81,12 @@ ASSET_TOKEN_CONFIG: dict[int, dict[str, tuple[str, int]]] = {
         "pyusd": ("0x6c3ea9036406852006290770BEdFcAbA0e23A0e8", 6),
         "usdtb": ("0xC139190F447e929f090edF9bB84c22a9D232dDA2", 18),
         "ausd": ("0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a", 6),
+        "eurcv": ("0x5F7827FDeb7c20b443265Fc2F40845B715385Ff2", 18),
     },
     8453: {
         "usdc": ("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", 6),
         "weth": ("0x4200000000000000000000000000000000000006", 18),
+        "eurc": ("0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42", 6),
     },
     42161: {
         "usdc": ("0xaf88d065e77c8cC2239327C5EDb3A432268e5831", 6),

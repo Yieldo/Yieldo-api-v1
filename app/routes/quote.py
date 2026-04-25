@@ -323,6 +323,15 @@ async def build_transaction(req: BuildRequest, request: Request):
     bridge = lifi.extract_bridge_from_quote(lifi_quote)
 
     cc_quote = None
+    # HyperEVM (999) — LiFi's same-chain swap aggregator on this chain routes
+    # through HyperSwap / native DEX routers that DON'T honor the post-swap
+    # contract call. Result: composer swap runs, our DepositRouter is never
+    # called, tx looks "completed" but no vault shares are minted. Same on the
+    # destination side of cross-chain deposits TO HyperEVM. Force two-step until
+    # LiFi's composer support on HyperEVM is reliable.
+    HYPEREVM = 999
+    if to_chain == HYPEREVM and not is_direct:
+        force_two_step = True
     if not force_two_step:
         to_amount, _ = lifi.extract_quote_amounts(lifi_quote)
         # Two layers of safety:

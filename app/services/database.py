@@ -250,15 +250,18 @@ async def update_transaction_status(
 async def get_user_deposits(address: str, limit: int = 50, skip: int = 0) -> list[dict]:
     if _db is None:
         return []
+    # Drop heavy `request` / `response` blobs but keep _id so the client can show
+    # a stable Yieldo tracking ID and link parent/child two-step records.
     cursor = _db["transactions"].find(
         {"user_address": address.lower()},
-        {
-            "_id": 0,
-            "request": 0,
-            "response": 0,
-        },
+        {"request": 0, "response": 0},
     ).sort("created_at", -1).skip(skip).limit(limit)
-    return await cursor.to_list(limit)
+    docs = await cursor.to_list(limit)
+    for d in docs:
+        oid = d.pop("_id", None)
+        if oid is not None:
+            d["tracking_id"] = str(oid)
+    return docs
 
 
 async def get_user_deposit_summary(address: str) -> dict:

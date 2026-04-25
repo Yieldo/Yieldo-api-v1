@@ -98,14 +98,16 @@ async def get_transfer_status(
     extra = {"lifi_explorer": lifi_explorer}
     if bridge:
         extra["bridge"] = bridge
-    # Detect partial / refunded on the destination chain. We expose the dest tx
-    # hash + actually-received token+amount so the HistoryPage can show what the
-    # user got back, instead of leaving them guessing.
+    # Always surface the destination receipt when LiFi knows it — for COMPLETED
+    # cross-chain deposits this is the link to the vault deposit / share mint
+    # on the dest chain (what the user actually wants to verify), and for
+    # PARTIAL/REFUNDED it's the refund tx with the received token/amount.
+    if r and r.get("txHash"):
+        extra["dest_tx_hash"] = r.get("txHash")
+        extra["dest_chain_id"] = to_chain_id
     if status == "DONE" and substatus in _LIFI_PARTIAL_SUBSTATUSES:
         db_status = "partial"
         if r:
-            extra["dest_tx_hash"] = r.get("txHash")
-            extra["dest_chain_id"] = to_chain_id
             extra["received_token"] = (r.get("token") or {}).get("address")
             extra["received_amount"] = r.get("amount")
     await database.update_transaction_status(tx_hash, from_chain_id, db_status, extra_fields=extra)

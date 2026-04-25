@@ -20,11 +20,15 @@ https://api.yieldo.xyz
 
 ## Key Concepts
 
-### Attribution-Only Router (V3.1.1)
+### Attribution-Only Router (V3.2.0)
 
 Yieldo's deposit router is non-custodial — it pulls tokens from the caller, deposits them into the vault, and emits a `Routed` event for on-chain attribution. No fees are deducted. 100% of the user's deposit goes into the vault.
 
-V3.1.1 keeps the depositFor entry point **open to any caller** — any address can call `depositFor(..., user=<anyone>)`, making the composer flow work across every LiFi bridge-receiver variant (ReceiverAcrossV3/V4, ReceiverStargateV2, ReceiverChainflip, per-chain Executors) without needing a router upgrade whenever LiFi adds a new bridge. Funds are always pulled from `msg.sender`, so the caller can only ever spend their own balance.
+V3.2.0 (live on every chain — Ethereum, Base, Arbitrum, Optimism, HyperEVM, Katana) adds **`depositForAvailable`**, which pulls `min(allowance, balance)` from `msg.sender` instead of an explicit amount. This is what cross-chain composer routes call: the bridge receiver (Across, Stargate, etc.) approves the router for the post-bridge amount and the router sweeps whatever actually arrived. Eliminates the "calldata says X, bridge delivered X-1, deposit reverts" failure mode entirely.
+
+V3.2.0 also handles ERC-4626 vaults whose `deposit()` returns void (some older OZ forks) via a `balanceOf` delta fallback.
+
+V3.1.1 carried over: depositFor entry point is **open to any caller** — any address can call with `user=<anyone>`, so the composer flow works across every LiFi bridge-receiver variant (ReceiverAcrossV3/V4, ReceiverStargateV2, ReceiverChainflip, per-chain Executors) without needing a router upgrade whenever LiFi adds a new bridge. Funds are always pulled from `msg.sender`, so the caller can only ever spend their own balance.
 
 V3.1.0 shipped an 8-arg `depositFor` overload with `minSharesOut` for on-chain slippage protection (7-arg form kept as compat shim), and added `shares` to the `Routed` event.
 
@@ -37,7 +41,7 @@ See [Deposit Router Contracts](/guides/deposit-router-contracts) for the full in
 For cross-chain deposits, Yieldo uses [LiFi](https://li.fi/) to bridge and swap tokens. Users can choose from multiple bridge routes (like Jumper.exchange), with the best route auto-selected.
 
 Two flows are supported:
-- **Single-step (LiFi Composer)** — used for Morpho / ERC-4626 vaults. LiFi bridges and calls `router.depositFor(...)` on the destination in one tx. Any bridge receiver can make the call (V3.1.1 — no whitelist).
+- **Single-step (LiFi Composer)** — used for Morpho / ERC-4626 vaults. LiFi bridges and calls `router.depositForAvailable(...)` on the destination in one tx. Any bridge receiver can make the call (V3.1.1 — no whitelist), and the router sweeps the actual delivered amount via `min(allowance, balance)` (V3.2.0 — bridge underdelivery can't revert the deposit).
 - **Two-step** — used for vault types that aren't composable with the bridge (Midas, Veda, Custom, IPOR, Lido). Step 1 bridges tokens to the user's wallet on the destination chain; step 2 is a same-chain `depositFor` call the user signs themselves.
 
 ### Vault Adapter Pattern

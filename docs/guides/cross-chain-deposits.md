@@ -24,7 +24,7 @@ Source Chain                               Destination Chain
                                           └──────────────────────────────┘
 ```
 
-LiFi's bridge receiver (Executor / ReceiverAcrossV4 / ReceiverStargateV2 / etc.) passes `user=<user>` instead of `msg.sender`. V3.1.1 removed the `authorizedCallers` gate so any LiFi receiver works without a router upgrade. No user signature beyond the bridge tx.
+LiFi's bridge receiver (Executor / ReceiverAcrossV4 / ReceiverStargateV2 / etc.) calls `router.depositForAvailable(...)` with `user=<user>`. V3.1.1 removed the `authorizedCallers` gate so any LiFi receiver works without a router upgrade. V3.2.0 made the call use `depositForAvailable` so the receiver doesn't need to know the exact post-bridge amount — the router sweeps `min(allowance, balance)`. No user signature beyond the bridge tx.
 
 ### Two-Step
 

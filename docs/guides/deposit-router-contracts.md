@@ -1,11 +1,17 @@
 ---
 title: "Deposit Router Contracts"
-description: "V3.1.1 attribution-only router, vault dispatch, open caller model"
+description: "V3.2.0 attribution-only router, vault dispatch, open caller model, depositForAvailable for cross-chain composer"
 ---
 
 The Deposit Router is an attribution-only, non-custodial pass-through. It pulls tokens from the caller, dispatches to the correct vault protocol (ERC-4626, Midas issuance vault, Veda teller, Lido queue, or custom adapter), forwards the minted shares to the user, and emits a `Routed` event for on-chain attribution. **No fees are deducted** — 100% of the user's tokens reach the vault.
 
-Current version: **V3.1.1** on all L2 / alt chains. Ethereum mainnet is on V3.1.0 pending a low-basefee upgrade window.
+Current version: **V3.2.0** on **all chains** (Ethereum, Base, Arbitrum, Optimism, HyperEVM, Katana). Mainnet upgraded 2026-04-25 in tx `0x2f7370658006e87972488159bc97dfc5cfef8067039e5127c8060c384ecbce21`.
+
+## What Changed in V3.2.0
+
+- **`depositForAvailable(...)`** — new entry point that pulls `min(allowance, balance)` from `msg.sender` instead of an explicit `amount` argument. Eliminates the calldata-amount-mismatch revert that bridge-fee underflows would otherwise cause: any 1-wei underdelivery from Across/Stargate would previously revert the whole composer call. Now the router sweeps whatever actually arrived.
+- **ERC-4626 void-return fallback** — vaults whose `deposit()` returns no value (some forks of OpenZeppelin's older 4626 reference) are detected via `vrd.length` and fall back to a `balanceOf` delta to compute shares. Removes a class of "Adapter: shares not delivered" reverts on niche forks.
+- All V3.1.1 changes (open caller model, no whitelist) carried forward.
 
 ## What Changed in V3.1.1
 
@@ -22,7 +28,7 @@ Current version: **V3.1.1** on all L2 / alt chains. Ethereum mainnet is on V3.1.
 
 ## Contract Addresses
 
-All chains except Ethereum are on V3.1.1 as of 2026-04-23. Same proxy address on Katana and HyperEVM is coincidental (CREATE2 on separate chains).
+All chains on **V3.2.0** as of 2026-04-25. Same proxy address on Katana and HyperEVM is coincidental (CREATE2 on separate chains).
 
 | Chain    | Chain ID | Proxy Address                                 |
 | -------- | -------- | --------------------------------------------- |
@@ -68,9 +74,39 @@ User sends LiFi tx on source chain → LiFi Executor on destination receives tok
 
 Because msg.sender is a LiFi bridge receiver (Executor, ReceiverAcrossV4, ReceiverStargateV2, etc.), the router must allow callers other than `user`. V3.1.1 accepts any msg.sender — only `msg.sender`'s own balance can be pulled.
 
+## depositForAvailable (V3.2.0+)
+
+Cross-chain composer entry point — pulls `min(allowance, balance)` from `msg.sender` instead of an explicit amount. Used by the `/v1/quote/build` API for any composer route so the destination call cannot revert on bridge underdelivery.
+
+```solidity
+function depositForAvailable(
+    address vault,
+    address asset,
+    address user,
+    bytes32 partnerId,
+    uint8 partnerType,
+    bool isERC4626,
+    uint256 minAmount,        // floor — revert if pulled amount < this
+    uint256 minSharesOut      // slippage floor on shares minted
+) external;
+```
+
+Behavior:
+
+```solidity
+uint256 allowed = IERC20(asset).allowance(msg.sender, address(this));
+uint256 bal     = IERC20(asset).balanceOf(msg.sender);
+uint256 amount  = allowed < bal ? allowed : bal;
+require(amount >= minAmount && amount > 0, "Insufficient");
+IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
+// dispatch via _executeVaultCall, emit Routed.
+```
+
+Why: LiFi's bridge receivers (Across, Stargate, etc.) approve the router for the post-bridge amount and call this. If the bridge delivered 1 wei less than the LiFi quote estimated, the explicit-amount `depositFor` would revert at `safeTransferFrom`. `depositForAvailable` sweeps the actual balance and proceeds.
+
 ## depositFor
 
-Primary entry point. Two overloaded forms are exposed for backward compatibility:
+Primary entry point for same-chain user-initiated deposits. Two overloaded forms are exposed for backward compatibility:
 
 ```solidity
 // 8-arg (preferred) — includes slippage floor

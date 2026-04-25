@@ -361,11 +361,13 @@ async def build_transaction(req: BuildRequest, request: Request):
         # entry methods all pull via that proxy. lifi_approval_target() handles both.
         approval_target = lifi_approval_target(req.from_chain_id, tx_req.get("to", ""))
 
-        # Use the LiFi quote's `estimate.fromAmount` (the GROSS input incl. integrator
-        # fee) for the approval, not req.from_amount. Otherwise allowance falls short
-        # of the Executor's transferFrom and the tx reverts with
-        # "transfer amount exceeds allowance".
-        approval_amount = str(lifi_quote.get("estimate", {}).get("fromAmount") or req.from_amount)
+        # Approval must cover whatever the Executor will pull. LiFi's
+        # `estimate.fromAmount` is normally the gross-with-fee value, but be
+        # defensive in case a route omits the field or under-reports — never
+        # approve LESS than the user's stated input. (Excess allowance is
+        # harmless — Executor only pulls what its swap data says.)
+        _est_from = int(lifi_quote.get("estimate", {}).get("fromAmount") or 0)
+        approval_amount = str(max(_est_from, int(req.from_amount)))
 
         to_amount, _ = lifi.extract_quote_amounts(lifi_quote)
         # Same buffer logic as composer: bridge delivery often lands below LiFi's quoted
@@ -418,10 +420,15 @@ async def build_transaction(req: BuildRequest, request: Request):
         tx_req = cc_quote["transactionRequest"]
         # See comment above: same Diamond-vs-Executor distinction applies to the
         # composer path. Most chains will return Executor here; the user must
-        # approve the chain's ERC20Proxy.
-        approval_target = lifi_approval_target(req.from_chain_id, tx_req.get("to", deposit_router))
+        # approve the chain's ERC20Proxy. If LiFi response is missing `to`,
+        # raise rather than silently using the wrong address.
+        lifi_to = tx_req.get("to")
+        if not lifi_to:
+            raise HTTPException(status_code=502, detail="LiFi quote missing transactionRequest.to")
+        approval_target = lifi_approval_target(req.from_chain_id, lifi_to)
         used_bridge = lifi.extract_bridge_from_quote(cc_quote)
-        approval_amount = str(cc_quote.get("estimate", {}).get("fromAmount") or req.from_amount)
+        _cc_est_from = int(cc_quote.get("estimate", {}).get("fromAmount") or 0)
+        approval_amount = str(max(_cc_est_from, int(req.from_amount)))
 
         response = BuildResponse(
             transaction_request=TransactionRequest(

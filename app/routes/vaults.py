@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query, Request
 from app.models import VaultResponse, VaultDetailResponse
-from app.services.vault import get_all_vaults, get_vault, get_vault_response
+from app.services.vault import get_all_vaults, get_vault, get_vault_response, audit_against_registry
 from app.services.rpc import get_vault_share_price
 from app.services import database
 from app.routes.partners import get_partner_from_api_key
@@ -65,6 +65,14 @@ async def get_vault_detail(vault_id: str):
         total_supply=str(total_supply) if total_supply is not None else None,
         share_price=share_price,
     )
+
+
+@router.get("/integrity")
+async def get_vault_registry_integrity():
+    """Diff vaults.json against the public/indexer registry. Returns lists of
+    vault_ids missing from each side. Use this in CI / monitoring to fail fast
+    when the two registries drift apart."""
+    return audit_against_registry()
 
 
 @router.get("/{vault_id}/stats")

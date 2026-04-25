@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import vaults, quote, status, info, partners, kols, deposits, users, withdraw, positions
-from app.services.vault import load_vaults, get_all_vaults_raw
+from app.services.vault import load_vaults, get_all_vaults_raw, start_registry_audit_thread
 from app.services import database, min_deposit
 from app.config import get_settings
 
@@ -10,6 +10,10 @@ from app.config import get_settings
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_vaults()
+    # Diff vaults.json vs the public/indexer registry so address drift surfaces
+    # in logs the moment the API boots — instead of when a user hits "Deposit"
+    # and gets "Vault not found".
+    start_registry_audit_thread()
     # Warm the per-vault min-deposit cache in parallel so the first /v1/vaults
     # response doesn't pay the 87-RPC cold-start. Runs in a background thread
     # so it doesn't block startup if RPCs are slow.

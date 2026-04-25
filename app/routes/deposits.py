@@ -41,6 +41,19 @@ async def get_user_deposits(
     return deposits
 
 
+@router.patch("/{tracking_id}/abandon")
+async def abandon_deposit(tracking_id: str):
+    """Mark a previously-built deposit as abandoned. Called when the user
+    rejects the wallet prompt or otherwise never broadcasts. Without this the
+    record sits in `pending` for the full 4h abandon timeout."""
+    try:
+        oid = ObjectId(tracking_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid tracking_id")
+    res = await database.set_transaction_status_if_pending(oid, "abandoned")
+    return {"ok": True, "updated": res, "tracking_id": tracking_id}
+
+
 @router.patch("/{tracking_id}/tx")
 async def report_deposit_tx(tracking_id: str, body: DepositTxReport):
     """Report the actual on-chain tx hash for a previously-built deposit.

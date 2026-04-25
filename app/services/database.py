@@ -198,6 +198,24 @@ async def save_transaction(
         return None
 
 
+async def set_transaction_status_if_pending(tracking_oid, new_status: str) -> bool:
+    """Force a tracking record to a new status, but only if it's still in
+    pending/submitted state (we don't want to overwrite a real terminal state).
+    Used when the user rejects the wallet prompt — we mark abandoned right away
+    instead of waiting for the 4h timeout."""
+    if _db is None:
+        return False
+    now = datetime.now(timezone.utc)
+    res = await _db["transactions"].update_one(
+        {"_id": tracking_oid, "status": {"$in": ["pending", "submitted"]}},
+        {
+            "$set": {"status": new_status, "updated_at": now},
+            "$push": {"status_history": {"status": new_status, "timestamp": now}},
+        },
+    )
+    return res.modified_count > 0
+
+
 async def set_transaction_tx_hash(tracking_oid, tx_hash: str) -> bool:
     """Attach the on-chain tx_hash to a previously-built tracking record.
     Called by `/v1/deposits/{tracking_id}/tx` once the user signs and broadcasts.

@@ -58,6 +58,12 @@ def load_vaults():
             "vault_id": vault_id,
             "name": v["name"],
             "address": v["address"],
+            # Mellow uses a multi-contract architecture: `address` is the
+            # orchestrator vault (TVL/strategies — what the indexer tracks);
+            # `share_token` is the ERC-20 the depositor receives. The router's
+            # lidoDepositQueues mapping and share-forwarding are keyed by the
+            # share token, so we keep both and pass share_token into calldata.
+            "share_token": v.get("share_token"),
             "chain_id": chain_id,
             "chain_name": CHAIN_CONFIG.get(chain_id, {}).get("name", "Unknown"),
             "asset_symbol": v["asset"],

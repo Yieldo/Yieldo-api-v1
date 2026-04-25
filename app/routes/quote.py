@@ -265,6 +265,10 @@ async def build_transaction(req: BuildRequest, request: Request):
     to_chain = vault["chain_id"]
     to_token = vault["asset_address"]
     deposit_router = vault["deposit_router"]
+    # For Mellow/Lido, the router's queue lookup and share forwarding are keyed
+    # by the share token, NOT the orchestrator vault address. For ERC-4626 etc.
+    # the deposit_target is just the vault address.
+    deposit_target = vault.get("share_token") or vault["address"]
     is_same_chain = req.from_chain_id == to_chain
     is_same_token = req.from_token.lower() == to_token.lower()
     is_direct = is_same_chain and is_same_token
@@ -281,7 +285,7 @@ async def build_transaction(req: BuildRequest, request: Request):
 
     if is_direct:
         calldata = encode_deposit_for_calldata(
-            to_chain, vault["address"], to_token, from_amount_int,
+            to_chain, deposit_target, to_token, from_amount_int,
             req.user_address, partner_id, partner_type, is_erc4626,
         )
         response = BuildResponse(
@@ -351,7 +355,7 @@ async def build_transaction(req: BuildRequest, request: Request):
         SWAP_HINT_BUFFER_BPS = 200  # 2.00%
         cc_amount = int(int(to_amount) * (10000 - SWAP_HINT_BUFFER_BPS) // 10000)
         cc_calldata = encode_deposit_for_available_calldata(
-            to_chain, vault["address"], to_token,
+            to_chain, deposit_target, to_token,
             req.user_address, partner_id, partner_type, is_erc4626,
             min_amount=0, min_shares_out=0,
         )
@@ -389,7 +393,7 @@ async def build_transaction(req: BuildRequest, request: Request):
         TWO_STEP_BUFFER_BPS = 200
         dep_amount = int(int(to_amount) * (10000 - TWO_STEP_BUFFER_BPS) // 10000)
         dep_calldata = encode_deposit_for_calldata(
-            to_chain, vault["address"], to_token, dep_amount,
+            to_chain, deposit_target, to_token, dep_amount,
             req.user_address, partner_id, partner_type, is_erc4626,
         )
 

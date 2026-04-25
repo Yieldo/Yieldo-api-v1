@@ -47,7 +47,7 @@
   {"address": "0x998D7b14c123c1982404562b68edDB057b0477cB", "name": "Upshift Gamma USDC", "chain_id": 1, "asset": "usdc", "type": "morpho"},
   {"address": "0xE9B725010A9E419412ed67d0fA5f3A5f40159D32", "name": "Upshift Core USDC", "chain_id": 1, "asset": "usdc", "type": "morpho"},
   {"address": "0x80E1048eDE66ec4c364b4F22C8768fc657FF6A42", "name": "Upshift USDC", "chain_id": 1, "asset": "usdc", "type": "morpho"},
-  {"address": "0xAEEb2fB279a5aA837367B9D2582F898a63b06ca1", "name": "Upshift NUSD", "chain_id": 1, "asset": "nusd", "type": "morpho"},
+  {"address": "0xAEEb2fB279a5aA837367B9D2582F898a63b06ca1", "share_token": "0xd852a101B7C6e0C647C8418A763394A37Dd72bCa", "name": "Upshift NUSD", "chain_id": 1, "asset": "nusd", "type": "upshift"},
   {"address": "0xeE8F4eC5672F09119b96Ab6fB59C27E1b7e44b61", "name": "Gauntlet USDC Prime", "chain_id": 8453, "asset": "usdc", "type": "morpho"},
   {"address": "0xBEEFE94c8aD530842bfE7d8B397938fFc1cb83b2", "name": "Steakhouse Prime USDC", "chain_id": 8453, "asset": "usdc", "type": "morpho"},
   {"address": "0xbeeF010f9cb27031ad51e3333f9aF9C6B1228183", "name": "Steakhouse USDC", "chain_id": 8453, "asset": "usdc", "type": "morpho"},

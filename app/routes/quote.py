@@ -275,7 +275,12 @@ async def build_transaction(req: BuildRequest, request: Request):
     from_amount_int = int(req.from_amount)
 
     vault_type = vault.get("type", "morpho")
-    is_erc4626 = vault_type in ("morpho", "ipor", "accountable")
+    # `upshift` uses an on-chain VaultAdapter on the router (deposit happens via
+    # the adapter's 3-arg `deposit(asset, amount, receiver)`). The router checks
+    # the adapter mapping BEFORE any type-specific branch, so we still pass
+    # isERC4626=true here — it's only consulted as a fallback when no adapter
+    # is wired. Adapter-routed vaults are sync, so composer works.
+    is_erc4626 = vault_type in ("morpho", "ipor", "accountable", "upshift")
     NON_COMPOSER_TYPES = ("midas", "veda", "custom", "ipor", "lido")
     force_two_step = vault_type in NON_COMPOSER_TYPES
     deposit_gas_limit = "900000" if vault_type in ("midas", "veda", "ipor", "lido") else "500000"

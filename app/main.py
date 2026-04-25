@@ -3,8 +3,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import vaults, quote, status, info, partners, kols, deposits, users, withdraw, positions
 from app.services.vault import load_vaults, get_all_vaults_raw, start_registry_audit_thread
-from app.services import database, min_deposit
+from app.services import database, min_deposit, status_resolver
 from app.config import get_settings
+import asyncio
 
 
 @asynccontextmanager
@@ -39,7 +40,16 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning(f"users-from-txs backfill failed: {e}")
+        # Background loop that converges every pending tx (any vault, any chain,
+        # any flow) to its real status within ~60s — independent of frontend
+        # polling. Without this, a user who closes the tab between sending and
+        # mining sees "Pending" forever.
+        resolver_task = asyncio.create_task(status_resolver.run_loop())
+    else:
+        resolver_task = None
     yield
+    if resolver_task:
+        resolver_task.cancel()
     await database.disconnect()
 
 

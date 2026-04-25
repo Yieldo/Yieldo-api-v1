@@ -258,6 +258,9 @@ async def build_transaction(req: BuildRequest, request: Request):
 
     if vault.get("type") == "unsupported":
         raise HTTPException(status_code=400, detail=f"Vault {vault['name']} does not support deposits through our router.")
+    if vault.get("paused"):
+        reason = vault.get("paused_reason") or "Deposits temporarily paused."
+        raise HTTPException(status_code=503, detail=f"{vault['name']}: {reason}")
 
     to_chain = vault["chain_id"]
     to_token = vault["asset_address"]

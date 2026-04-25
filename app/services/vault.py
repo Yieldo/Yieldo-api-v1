@@ -67,6 +67,8 @@ def load_vaults():
             "type": v.get("type", "morpho"),
             "min_deposit": v.get("min_deposit"),
             "curator": v.get("curator"),
+            "paused": bool(v.get("paused", False)),
+            "paused_reason": v.get("paused_reason"),
         }
 
 
@@ -230,4 +232,6 @@ def _to_response(v: dict) -> VaultResponse:
         min_deposit=str(resolved_min) if resolved_min is not None else None,
         no_minimum=no_min,
         curator=v.get("curator"),
+        paused=bool(v.get("paused", False)),
+        paused_reason=v.get("paused_reason"),
     )

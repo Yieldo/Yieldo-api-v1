@@ -31,6 +31,10 @@ class VaultResponse(BaseModel):
     # Curator label override — used for vaults not covered by Morpho's API
     # (e.g. Veda / Ether.fi). None = let frontend fall back to its usual source.
     curator: Optional[str] = None
+    # Temporary deposit pause — set when an upstream protocol (e.g. Lido)
+    # pauses their queue. UI greys out deposit + shows the reason.
+    paused: bool = False
+    paused_reason: Optional[str] = None
 
 
 class VaultDetailResponse(VaultResponse):

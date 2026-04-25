@@ -125,6 +125,8 @@ ASSET_TOKEN_CONFIG: dict[int, dict[str, tuple[str, int]]] = {
         "usdtb": ("0xC139190F447e929f090edF9bB84c22a9D232dDA2", 18),
         "ausd": ("0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a", 6),
         "eurcv": ("0x5F7827FDeb7c20b443265Fc2F40845B715385Ff2", 18),
+        "rseth": ("0xA1290d69c65A6Fe4DF752f95823fae25cB99e5A7", 18),  # Kelp restaked ETH — required by Upshift Kelp Gain & High Growth ETH
+        "nusd": ("0xE556ABa6fe6036275Ec1f87eda296BE72C811BCE", 18),  # Neutrl USD — required by Upshift NUSD
     },
     8453: {
         "usdc": ("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", 6),

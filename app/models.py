@@ -119,10 +119,6 @@ class BuildRequest(BaseModel):
     preferred_bridge: Optional[str] = None
     partner_id: str = ""
     partner_type: int = 0
-    # Set to true to bypass the fee guard ("fees > 30% of deposit") after the
-    # user has explicitly seen and acknowledged the warning in the UI. The
-    # hard-fail (fees > deposit value) is NEVER bypassable — that's loss-making.
-    accept_high_fee: bool = False
 
 
 class TransactionRequest(BaseModel):

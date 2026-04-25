@@ -56,54 +56,6 @@ def _partner_id_bytes(partner_id: str) -> bytes:
     return Web3.keccak(text=partner_id)
 
 
-# Fee thresholds. Hard-fail prevents a tx the user would *lose money* on
-# (cross-chain composer to mainnet at $1 inputs is the canonical case — pays
-# $5+ in LayerZero+gas to deliver $1). Soft-warn surfaces high-fee routes the
-# user can override after acknowledging.
-HARD_FEE_RATIO = 1.0   # fee_usd >= 100% of from_amount_usd  -> reject
-SOFT_FEE_RATIO = 0.30  # fee_usd >= 30%  of from_amount_usd  -> require accept_high_fee=true
-
-
-def _compute_fee_usd(lifi_quote: dict) -> tuple[float | None, float | None, float | None]:
-    """Return (fee_usd, from_usd, fee_pct). Any can be None when LiFi
-    didn't provide USD pricing (rare; mostly exotic L2 tokens)."""
-    est = lifi_quote.get("estimate", {})
-    try:
-        from_usd = float(est.get("fromAmountUSD") or 0)
-        to_usd = float(est.get("toAmountUSD") or 0)
-        gas_usd = sum(float(g.get("amountUSD") or 0) for g in est.get("gasCosts") or [])
-        fee_usd = (from_usd - to_usd) + gas_usd  # bridge spread + gas burned
-        if from_usd <= 0:
-            return fee_usd, from_usd, None
-        return fee_usd, from_usd, fee_usd / from_usd
-    except Exception:
-        return None, None, None
-
-
-def _enforce_fee_guard(lifi_quote: dict, vault_name: str, accept_high_fee: bool) -> None:
-    fee_usd, from_usd, fee_pct = _compute_fee_usd(lifi_quote)
-    if fee_pct is None or from_usd is None or from_usd <= 0:
-        return  # no USD pricing — can't judge, let it through
-    if fee_pct >= HARD_FEE_RATIO:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Fee guard: route would cost ~${fee_usd:.2f} in bridge+gas to deliver "
-                f"~${from_usd:.2f} into {vault_name}. You'd LOSE ${fee_usd - from_usd:.2f} on this tx. "
-                f"Increase your deposit, switch to a same-chain route, or pick a cheaper source chain."
-            ),
-        )
-    if fee_pct >= SOFT_FEE_RATIO and not accept_high_fee:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Fee guard: route fees are ${fee_usd:.2f} ({fee_pct*100:.0f}% of your "
-                f"${from_usd:.2f} deposit) — high. Increase deposit, change source chain, or "
-                f"resubmit with accept_high_fee=true to acknowledge and proceed."
-            ),
-        )
-
-
 @router.post("", response_model=QuoteResponse)
 async def get_quote(req: QuoteRequest, request: Request):
     partner = await get_partner_from_api_key(request)
@@ -189,13 +141,6 @@ async def get_quote(req: QuoteRequest, request: Request):
     if min_deposit and to_amount_min_int < min_deposit:
         human = min_deposit / (10 ** vault["asset_decimals"])
         raise HTTPException(status_code=400, detail=f"Minimum deposit is {human:g} {vault['asset_symbol'].upper()} — increase your input amount.")
-
-    # Surface fees pre-action. /v1/quote always rejects loss-making routes;
-    # the soft warning is also raised so the UI can show "fees too high" with
-    # the actual numbers and let the user adjust their input. (We intentionally
-    # do NOT accept_high_fee here — the user will hit it again at /quote/build
-    # if they explicitly accept.)
-    _enforce_fee_guard(lifi_quote, vault["name"], accept_high_fee=False)
 
     route_options = None
     if not is_same_chain:
@@ -381,11 +326,6 @@ async def build_transaction(req: BuildRequest, request: Request):
         )
     if not lifi_quote:
         raise HTTPException(status_code=400, detail="No route found")
-
-    # Refuse to BUILD a tx whose fees would dominate the deposit. Hard-fail is
-    # always enforced (loss-making); soft-fail can be overridden via
-    # accept_high_fee=true once the user has acknowledged the warning in the UI.
-    _enforce_fee_guard(lifi_quote, vault["name"], accept_high_fee=req.accept_high_fee)
 
     bridge = lifi.extract_bridge_from_quote(lifi_quote)
 

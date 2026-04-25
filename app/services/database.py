@@ -186,6 +186,7 @@ async def save_transaction(
             "tx_hash": None,
             "lifi_explorer": tracking.get("lifi_explorer"),
             "bridge": tracking.get("bridge"),
+            "parent_tracking_id": request_dict.get("parent_tracking_id"),
             "status_history": [{"status": "pending", "timestamp": now}],
             "created_at": now,
             "updated_at": now,

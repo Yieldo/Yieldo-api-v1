@@ -107,6 +107,11 @@ class BuildRequest(BaseModel):
     slippage: float = 0.03
     referrer: str = "0x0000000000000000000000000000000000000000"
     referrer_handle: str = ""
+    # If this build is the second leg of a two-step deposit (cross-chain bridge
+    # then a separate same-chain deposit on the destination), the client passes
+    # the parent bridge tx's tracking_id here. We persist it so HistoryPage can
+    # group both records as one user action.
+    parent_tracking_id: Optional[str] = None
     preferred_bridge: Optional[str] = None
     partner_id: str = ""
     partner_type: int = 0

@@ -146,6 +146,14 @@ ASSET_TOKEN_CONFIG: dict[int, dict[str, tuple[str, int]]] = {
         "usdc": ("0xb88339CB7199b77E23DB6E890353E22632Ba630f", 6),  # Circle USDC
         "ubtc": ("0x9FDBdA0A5e284c32744D2f17Ee5c74B284993463", 8),  # uBTC (commonly used on HyperEVM)
     },
+    143: {
+        # Monad has multiple USDC deployments. This is the one used by Hyperithm,
+        # Yuzu, Upshift AUSD, and other live vaults. Pinning explicitly so the
+        # frontend's USDC token addr matches vault.asset() — without this match
+        # is_direct=False and quote falls into LiFi → "No route found" on
+        # same-chain same-token deposits.
+        "usdc": ("0x754704Bc059F8C67012fEd69BC8A327a5aafb603", 6),
+    },
 }
 
 

@@ -67,6 +67,53 @@ async def _rpc_get_receipt(client: httpx.AsyncClient, rpc: str, tx_hash: str) ->
         return None
 
 
+# ERC-20 Transfer event signature — keccak256("Transfer(address,address,uint256)")
+_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+
+def _verify_share_mint(receipt: dict, share_token: str, user: str) -> bool:
+    """Scan receipt logs for a Transfer of `share_token` to `user` with
+    non-zero amount. Returns True iff the deposit actually delivered shares.
+
+    Works for any vault type — single source of truth is whether the share
+    token's ERC-20 ledger updated for the user. If a swap/bridge succeeded
+    but the deposit call reverted silently (composer drop, paused vault,
+    etc.), this catches it: there'll be no Transfer event in the receipt."""
+    if not share_token or not user:
+        return False
+    st = share_token.lower()
+    user_topic = "0x" + ("000000000000000000000000" + user.lower().lstrip("0x")).rjust(64, "0")[-64:]
+    for log in receipt.get("logs") or []:
+        try:
+            if (log.get("address") or "").lower() != st:
+                continue
+            topics = log.get("topics") or []
+            if len(topics) < 3 or topics[0].lower() != _TRANSFER_TOPIC:
+                continue
+            if topics[2].lower() != user_topic.lower():
+                continue
+            amount_hex = log.get("data", "0x0")
+            if int(amount_hex, 16) > 0:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _share_token_for(doc: dict) -> str | None:
+    """Look up the share token for a deposit's vault. Defaults to vault address
+    (most ERC-4626 vaults are themselves the share token). Falls back to
+    `share_token` override for multi-contract vaults (Lido, Upshift, Mellow)."""
+    try:
+        from app.services.vault import get_vault
+    except Exception:
+        return None
+    vault = get_vault(doc.get("vault_id") or "")
+    if not vault:
+        return None
+    return vault.get("share_token") or vault.get("address")
+
+
 async def _lifi_status(client: httpx.AsyncClient, tx_hash: str, from_chain: int, to_chain: int) -> dict | None:
     try:
         r = await client.get(
@@ -127,6 +174,25 @@ async def _resolve_record(client: httpx.AsyncClient, doc: dict) -> tuple[str | N
                 extra["bridge"] = bridge
             extra["lifi_explorer"] = f"https://explorer.li.fi/tx/{tx_hash}"
             if s == "DONE" and sub == "COMPLETED":
+                # LiFi says bridge+composer succeeded. For single-tx (composer)
+                # flows, verify the share token actually minted to the user on
+                # the dest chain. Catches the "composer call dropped silently
+                # on the dest chain" failure mode where LiFi reports DONE but
+                # no shares ever arrived. Two-step flows are handled later by
+                # mirroring the child record's status — no verification here
+                # because the dest tx is just the asset delivery, not the deposit.
+                is_two_step = bool((doc.get("response") or {}).get("two_step"))
+                if not is_two_step and rcv.get("txHash"):
+                    rpc = _rpc_url(to_chain)
+                    user = (doc.get("user_address") or "").lower()
+                    share_token = _share_token_for(doc)
+                    if rpc and user and share_token:
+                        dest_receipt = await _rpc_get_receipt(client, rpc, rcv["txHash"])
+                        if dest_receipt and not _verify_share_mint(dest_receipt, share_token, user):
+                            extra["resolution_note"] = "Bridge+composer DONE per LiFi but no share-mint event on dest — composer call likely dropped"
+                            extra["received_token"] = (rcv.get("token") or {}).get("address")
+                            extra["received_amount"] = rcv.get("amount")
+                            return "partial", extra
                 return "completed", extra
             if s == "DONE" and sub in ("PARTIAL", "REFUNDED"):
                 extra["received_token"] = (rcv.get("token") or {}).get("address")
@@ -148,9 +214,11 @@ async def _resolve_record(client: httpx.AsyncClient, doc: dict) -> tuple[str | N
                         return "completed", extra
         return None, extra
 
-    # Same-chain: receipt is authoritative for ALL vault types
-    # (ERC-4626 morpho/ipor, Lido, Veda, Midas, custom — receipt status==1
-    # means the router accepted the deposit and forwarded shares).
+    # Same-chain: receipt is authoritative for SINGLE-TX flows. For two-step
+    # parents (e.g. Midas/Veda/IPOR/Lido + same-chain swap), the source tx is
+    # only the swap — the actual deposit happens in a separate child tx.
+    # Marking "completed" on source receipt alone is the bug that made
+    # Midas HyperBTC swaps look successful with no real deposit.
     rpc = _rpc_url(from_chain)
     if not rpc:
         return None, extra
@@ -158,10 +226,49 @@ async def _resolve_record(client: httpx.AsyncClient, doc: dict) -> tuple[str | N
     if not receipt:
         return None, extra
     status = receipt.get("status")
-    if status == "0x1":
-        return "completed", extra
     if status == "0x0":
         return "failed", extra
+    if status != "0x1":
+        return None, extra
+
+    # Source confirmed. Two-step parent? Wait for the child deposit.
+    is_two_step_parent = (
+        bool((doc.get("response") or {}).get("two_step"))
+        and not doc.get("parent_tracking_id")
+    )
+    if not is_two_step_parent:
+        # Single-tx flow (direct deposit OR same-chain composer). Receipt
+        # status==1 alone isn't enough — the inner deposit call could revert
+        # silently (e.g. composer drop, vault rejection). Verify the share
+        # token actually minted to the user.
+        user = (doc.get("user_address") or "").lower()
+        share_token = _share_token_for(doc)
+        if user and share_token and not _verify_share_mint(receipt, share_token, user):
+            extra["resolution_note"] = (
+                "Source tx confirmed but no share-mint event for this user — "
+                "swap/bridge succeeded but actual deposit didn't happen"
+            )
+            return "partial", extra
+        return "completed", extra
+
+    # Look up the child by parent_tracking_id and mirror its terminal state.
+    db = database._db  # noqa: SLF001
+    child = await db["transactions"].find_one(
+        {"parent_tracking_id": str(doc["_id"])},
+        sort=[("created_at", -1)],
+    ) if db is not None else None
+    if child:
+        cs = child.get("status")
+        if cs in ("completed", "failed", "partial"):
+            extra["resolution_note"] = f"two-step parent: mirrored child status {cs}"
+            return cs, extra
+        # Child exists but still pending — keep parent pending too
+        return None, extra
+
+    # No child yet. After a grace period assume step-2 was abandoned.
+    if created and (datetime.now(timezone.utc) - created).total_seconds() > ABANDON_HOURS * 3600:
+        extra["resolution_note"] = "two-step parent: child never created within abandon window"
+        return "abandoned", extra
     return None, extra
 
 

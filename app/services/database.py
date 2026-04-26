@@ -361,8 +361,36 @@ async def get_creator_application(address: str) -> dict | None:
     return doc
 
 
+async def get_withdrawn_per_vault(user_address: str) -> dict[str, int]:
+    """{vault_id: total_withdrawn_asset_amount} from withdrawals collection.
+    Sums `assets_out` (in vault-asset units) for any non-pending withdrawal —
+    these reduce the user's cost basis. Skips records without assets_out
+    (legacy entries from before that field was stored)."""
+    if _db is None:
+        return {}
+    addr = user_address.lower()
+    cursor = _db["withdrawals"].find(
+        {"user": addr, "status": {"$in": ["submitted", "completed", "claimed"]}},
+    )
+    totals: dict[str, int] = {}
+    async for w in cursor:
+        vid = w.get("vault_id")
+        amt_str = w.get("assets_out")
+        if not vid or not amt_str:
+            continue
+        try:
+            totals[vid] = totals.get(vid, 0) + int(amt_str)
+        except (ValueError, TypeError):
+            continue
+    return totals
+
+
 async def get_deposited_per_vault(user_address: str) -> dict[str, int]:
-    """Return {vault_id: total_deposited_asset_amount} for completed deposits.
+    """Return {vault_id: NET_deposited_asset_amount} = sum(deposits) - sum(withdrawals).
+
+    Without subtracting withdrawals the yield calc breaks: deposit $100, earn $5,
+    withdraw $50 => current=$55 vs deposited=$100 => yield reads as -$45 even
+    though you actually made +$5.
 
     The amount must be in the VAULT ASSET's smallest unit (e.g., 6 dp for USDC),
     not the source token's unit. We extract it from the build response's
@@ -408,6 +436,10 @@ async def get_deposited_per_vault(user_address: str) -> dict[str, int]:
         except (ValueError, TypeError):
             continue
         totals[vid] = totals.get(vid, 0) + amt
+    # Subtract anything the user has withdrawn (or has in flight as claimable)
+    withdrawn = await get_withdrawn_per_vault(user_address)
+    for vid, w in withdrawn.items():
+        totals[vid] = max(0, totals.get(vid, 0) - w)
     return totals
 
 
@@ -758,12 +790,18 @@ async def get_kol_by_referrer(addr: str) -> Optional[dict]:
     return await _db["kols"].find_one({"$or": [{"address": a}, {"fee_collector_address": a}]})
 
 
-async def save_withdraw(*, user: str, vault_id: str, vault_name: str, shares: str, asset: str, mode: str, chain_id: int) -> Optional[str]:
+async def save_withdraw(*, user: str, vault_id: str, vault_name: str, shares: str, asset: str,
+                         mode: str, chain_id: int, assets_out: Optional[str] = None) -> Optional[str]:
+    """Persist a withdraw intent. `assets_out` is the (min) asset amount the
+    user expects to receive in vault-asset units — needed by the portfolio's
+    yield calc so withdrawals reduce the cost basis (otherwise withdrawing
+    after earning yield makes yield show as negative)."""
     if _db is None:
         return None
     doc = {
         "user": user.lower(), "vault_id": vault_id, "vault_name": vault_name,
         "shares": shares, "asset": asset.lower(), "mode": mode, "chain_id": chain_id,
+        "assets_out": assets_out,
         "status": "pending", "created_at": datetime.now(timezone.utc),
     }
     result = await _db["withdrawals"].insert_one(doc)

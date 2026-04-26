@@ -221,6 +221,7 @@ async def withdraw_build(req: WithdrawBuildRequest):
     resp.tracking_id = await database.save_withdraw(
         user=req.user_address, vault_id=req.vault_id, vault_name=vault["name"],
         shares=req.shares, asset=asset, mode=req.mode, chain_id=to_chain,
+        assets_out=req.min_amount_out,  # vault-asset units; used by portfolio yield calc
     )
     return resp
 

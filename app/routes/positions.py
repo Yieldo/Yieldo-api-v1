@@ -119,6 +119,15 @@ async def get_positions(user_address: str, chain_id: int | None = Query(None)):
             yield_amt = None
             if current_assets is not None and dep_amt is not None:
                 yield_amt = current_assets - dep_amt
+                # Sanity guard: implausibly large negative yield = our cost basis
+                # is wrong (e.g. user moved shares off-Yieldo, or pre-fix records
+                # inflated deposits). A real yield-vault loss caps at ~10% over
+                # weeks; -50%+ is always a data artifact, not a real loss. Cap
+                # cost basis to current_assets in that case so the row shows
+                # yield = 0 instead of a huge fake red number.
+                if current_assets > 0 and yield_amt < 0 and abs(yield_amt) > current_assets * 0.5:
+                    dep_amt = current_assets
+                    yield_amt = 0
 
             value_usd = zp.get("value_usd")
             if value_usd is None:
@@ -195,6 +204,9 @@ async def get_positions(user_address: str, chain_id: int | None = Query(None)):
         yield_amt = None
         if current_assets is not None and dep_amt is not None:
             yield_amt = current_assets - dep_amt
+            if current_assets > 0 and yield_amt < 0 and abs(yield_amt) > current_assets * 0.5:
+                dep_amt = current_assets
+                yield_amt = 0
 
         asset_dec = v.get("asset_decimals", 18)
         value_usd = _usd_fallback(v.get("asset_symbol"), current_assets, asset_dec)

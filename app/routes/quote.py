@@ -56,6 +56,44 @@ def _partner_id_bytes(partner_id: str) -> bytes:
     return Web3.keccak(text=partner_id)
 
 
+def _source_token_symbol(chain_id: int, token_address: str) -> str | None:
+    """Reverse-lookup a token address to its symbol on a given chain.
+    Returns lowercase symbol or None if not in our asset config."""
+    from app.core.constants import ASSET_TOKEN_CONFIG
+    chain_assets = ASSET_TOKEN_CONFIG.get(chain_id, {})
+    a = (token_address or "").lower()
+    for sym, (addr, _dec) in chain_assets.items():
+        if addr.lower() == a:
+            return sym
+    return None
+
+
+def _select_dest_token(vault: dict, from_chain_id: int, from_token: str) -> str:
+    """Pick which of the vault's accepted_assets to use as the bridge/deposit
+    target. Same-chain & address match -> direct. Cross-chain & symbol match
+    in accepted_assets -> bridge same-symbol (cheaper, no swap). Else fall
+    back to the vault's primary asset."""
+    accepted = vault.get("accepted_assets") or [{
+        "address": vault["asset_address"],
+        "symbol": vault["asset_symbol"],
+        "decimals": vault["asset_decimals"],
+    }]
+    # Same chain: direct address match
+    if from_chain_id == vault["chain_id"]:
+        m = next((a for a in accepted if a["address"].lower() == from_token.lower()), None)
+        if m:
+            return m["address"]
+    # Cross chain (or no direct match): try matching the SOURCE token's symbol
+    # against any accepted asset on the dest chain — same symbol = same-token
+    # bridge (USDC->USDC), cheaper than asset-swap during bridge.
+    src_sym = _source_token_symbol(from_chain_id, from_token)
+    if src_sym:
+        m = next((a for a in accepted if (a.get("symbol") or "").lower() == src_sym.lower()), None)
+        if m:
+            return m["address"]
+    return vault["asset_address"]
+
+
 @router.post("", response_model=QuoteResponse)
 async def get_quote(req: QuoteRequest, request: Request):
     partner = await get_partner_from_api_key(request)
@@ -74,9 +112,14 @@ async def get_quote(req: QuoteRequest, request: Request):
         raise HTTPException(status_code=400, detail=f"Vault {vault['name']} does not support deposits through our router. Please deposit directly on the protocol's website.")
 
     to_chain = vault["chain_id"]
-    to_token = vault["asset_address"]
     deposit_router = vault["deposit_router"]
     is_same_chain = req.from_chain_id == to_chain
+    # Smart routing across the vault's accepted_assets:
+    #   same-chain match  -> direct deposit (no swap)
+    #   cross-chain symbol match (e.g. Base USDC -> Eth USDC for a USDT/USDC vault)
+    #     -> bridge same-symbol (cheap, no swap during bridge)
+    #   else -> fall back to vault's primary asset
+    to_token = _select_dest_token(vault, req.from_chain_id, req.from_token)
     is_same_token = req.from_token.lower() == to_token.lower()
     is_direct = is_same_chain and is_same_token
 
@@ -269,18 +312,9 @@ async def build_transaction(req: BuildRequest, request: Request):
     # the deposit_target is just the vault address.
     deposit_target = vault.get("share_token") or vault["address"]
     is_same_chain = req.from_chain_id == to_chain
-    # Vaults can accept multiple deposit assets (e.g. Lido Earn USD accepts
-    # USDT and USDC — both queues are wired on-chain). If the user's input
-    # token matches any accepted asset, treat as direct (no swap). Otherwise
-    # default to the primary asset and route via LiFi for swap/bridge.
-    accepted = vault.get("accepted_assets") or [{"address": vault["asset_address"], "decimals": vault["asset_decimals"], "symbol": vault["asset_symbol"]}]
-    matched = next((a for a in accepted if a["address"].lower() == req.from_token.lower()), None)
-    if matched:
-        to_token = matched["address"]
-        is_same_token = True
-    else:
-        to_token = vault["asset_address"]
-        is_same_token = req.from_token.lower() == to_token.lower()
+    # Same smart routing as get_quote — keep both endpoints consistent.
+    to_token = _select_dest_token(vault, req.from_chain_id, req.from_token)
+    is_same_token = req.from_token.lower() == to_token.lower()
     is_direct = is_same_chain and is_same_token
     from_amount_int = int(req.from_amount)
 

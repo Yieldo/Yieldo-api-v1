@@ -100,7 +100,7 @@ async def withdraw_quote(req: WithdrawQuoteRequest):
     if not vault:
         raise HTTPException(status_code=404, detail=f"Vault {req.vault_id} not found")
     if vault.get("type") == "unsupported":
-        raise HTTPException(status_code=400, detail=f"Vault {vault['name']} not supported")
+        raise HTTPException(status_code=400, detail=f"{vault['name']}: withdrawals temporarily unavailable.")
 
     vault_type = vault.get("type", "morpho")
     if vault_type == "veda":
@@ -117,7 +117,7 @@ async def withdraw_quote(req: WithdrawQuoteRequest):
         site = "https://app.ipor.io" if vault_type == "ipor" else "https://earn.lido.fi"
         raise HTTPException(
             status_code=400,
-            detail=f"Withdrawals for {vault['name']} must be done via {brand}'s website ({site}). This vault uses a scheduled-withdraw flow not yet supported by the Yieldo router.",
+            detail=f"Withdrawals for {vault['name']} must be done via {brand}'s website ({site}).",
         )
 
     shares = int(req.shares)
@@ -153,7 +153,7 @@ async def withdraw_quote(req: WithdrawQuoteRequest):
     if vault_type == "midas":
         rv = MIDAS_REDEMPTION_VAULTS.get(vault_addr.lower())
         if not rv:
-            raise HTTPException(status_code=400, detail=f"No RV configured for {vault['name']}")
+            raise HTTPException(status_code=400, detail=f"Withdrawals for {vault['name']} are temporarily unavailable.")
         approval = ApprovalData(token_address=vault_addr, spender_address=rv, amount=str(shares))
     else:
         # For ERC-4626 redeem, the caller is the owner — no allowance needed.
@@ -199,7 +199,7 @@ async def withdraw_build(req: WithdrawBuildRequest):
     if vault_type == "midas":
         rv = MIDAS_REDEMPTION_VAULTS.get(vault_addr.lower())
         if not rv:
-            raise HTTPException(status_code=400, detail="No RV configured for this Midas vault")
+            raise HTTPException(status_code=400, detail="Withdrawals temporarily unavailable for this vault.")
         if req.mode == "sync":
             calldata = _encode_midas_instant(w3, rv, asset, shares, min_out)
         else:

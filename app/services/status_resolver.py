@@ -189,7 +189,7 @@ async def _resolve_record(client: httpx.AsyncClient, doc: dict) -> tuple[str | N
                     if rpc and user and share_token:
                         dest_receipt = await _rpc_get_receipt(client, rpc, rcv["txHash"])
                         if dest_receipt and not _verify_share_mint(dest_receipt, share_token, user):
-                            extra["resolution_note"] = "Bridge+composer DONE per LiFi but no share-mint event on dest — composer call likely dropped"
+                            extra["resolution_note"] = "Bridge succeeded but the deposit did not complete on the destination chain. Funds may have been refunded to your wallet."
                             extra["received_token"] = (rcv.get("token") or {}).get("address")
                             extra["received_amount"] = rcv.get("amount")
                             return "partial", extra
@@ -210,7 +210,7 @@ async def _resolve_record(client: httpx.AsyncClient, doc: dict) -> tuple[str | N
                 if receipt.get("status") == "0x1" and created:
                     age_h = (datetime.now(timezone.utc) - created).total_seconds() / 3600
                     if age_h > STALE_CROSSCHAIN_HOURS:
-                        extra["resolution_note"] = "Source confirmed; LiFi data unavailable."
+                        extra["resolution_note"] = "Transaction confirmed on source chain. Bridge tracker no longer available — assumed complete."
                         return "completed", extra
         return None, extra
 
@@ -244,10 +244,7 @@ async def _resolve_record(client: httpx.AsyncClient, doc: dict) -> tuple[str | N
         user = (doc.get("user_address") or "").lower()
         share_token = _share_token_for(doc)
         if user and share_token and not _verify_share_mint(receipt, share_token, user):
-            extra["resolution_note"] = (
-                "Source tx confirmed but no share-mint event for this user — "
-                "swap/bridge succeeded but actual deposit didn't happen"
-            )
+            extra["resolution_note"] = "Transaction confirmed but the deposit step did not complete. No vault shares were received."
             return "partial", extra
         return "completed", extra
 
@@ -260,14 +257,13 @@ async def _resolve_record(client: httpx.AsyncClient, doc: dict) -> tuple[str | N
     if child:
         cs = child.get("status")
         if cs in ("completed", "failed", "partial"):
-            extra["resolution_note"] = f"two-step parent: mirrored child status {cs}"
+            # Mirror child status without exposing internal "two-step parent" jargon.
             return cs, extra
-        # Child exists but still pending — keep parent pending too
         return None, extra
 
     # No child yet. After a grace period assume step-2 was abandoned.
     if created and (datetime.now(timezone.utc) - created).total_seconds() > ABANDON_HOURS * 3600:
-        extra["resolution_note"] = "two-step parent: child never created within abandon window"
+        extra["resolution_note"] = "Deposit step was not completed in time."
         return "abandoned", extra
     return None, extra
 

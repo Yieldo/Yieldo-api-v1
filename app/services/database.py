@@ -169,6 +169,18 @@ async def save_transaction(
         # written with the user's checksummed address never appear in their
         # /v1/deposits or HistoryPage results.
         ua = request_dict.get("user_address") or ""
+        # Pre-extract the actual deposit amount in vault-asset units so the
+        # portfolio yield calc has a clean field instead of needing to dig
+        # through `response.deposit_tx.approval` / `response.approval` etc.
+        # Same priority order as get_deposited_per_vault.
+        dep_tx = (response_dict.get("deposit_tx") or {})
+        ap_dep = (dep_tx.get("approval") or {})
+        ap_top = (response_dict.get("approval") or {})
+        # The vault asset address is what the deposit ends up as; the build
+        # already validated this. We don't have it here directly so we just
+        # take the deposit_tx amount (always vault-asset units) when present,
+        # else top-level approval amount when present.
+        deposit_amount = ap_dep.get("amount") or ap_top.get("amount")
         doc = {
             "request": request_dict,
             "response": response_dict,
@@ -179,6 +191,7 @@ async def save_transaction(
             "to_chain_id": tracking.get("to_chain_id"),
             "from_token": (request_dict.get("from_token") or "").lower(),
             "from_amount": request_dict.get("from_amount"),
+            "deposit_amount": deposit_amount,  # vault-asset units; for yield calc
             "referrer": (referrer or request_dict.get("referrer", "") or "").lower(),
             "referrer_handle": referrer_handle,
             "quote_type": quote_type,
@@ -413,29 +426,45 @@ async def get_deposited_per_vault(user_address: str) -> dict[str, int]:
         vid = tx.get("vault_id")
         if not vid:
             continue
-        # Authoritative: response.estimate.deposit_amount — what actually hits
-        # the vault (in vault-asset units after any swap/bridge).
+        v = get_vault(vid)
+        vault_asset = (v.get("asset_address") or "").lower() if v else ""
+        from_token = (tx.get("from_token") or "").lower()
+        resp = tx.get("response") or {}
+
+        # Look for the deposit amount in vault-asset units, in priority order.
         amt_str = None
-        try:
-            est = ((tx.get("response") or {}).get("estimate") or {})
-            amt_str = est.get("deposit_amount") or est.get("to_amount")
-        except Exception:
-            amt_str = None
-        # Fallback: from_amount, but ONLY if the user deposited the vault's own
-        # asset directly. Otherwise from_amount is in a totally different unit.
+
+        # 1) Top-level deposit_amount (set on new records by save_transaction).
         if not amt_str:
-            from_token = (tx.get("from_token") or "").lower()
-            v = get_vault(vid)
-            if v and from_token == (v.get("asset_address") or "").lower():
-                amt_str = tx.get("from_amount")
-            else:
-                # Unknown unit, skip — adding wrong-unit amount destroys the yield calc
-                continue
+            amt_str = tx.get("deposit_amount")
+        # 2) Two-step build: deposit_tx.approval.amount is what hits the vault
+        #    on the destination, in vault-asset units.
+        if not amt_str:
+            dep_tx = resp.get("deposit_tx") or {}
+            ap = dep_tx.get("approval") or {}
+            if ap.get("amount"):
+                amt_str = ap["amount"]
+        # 3) Single-tx where the approval token IS the vault asset (direct or
+        #    composer ending with a 4626 deposit). approval.amount is the
+        #    amount approved, equal to deposit amount in those flows.
+        if not amt_str:
+            ap = resp.get("approval") or {}
+            if (ap.get("token_address") or "").lower() == vault_asset:
+                amt_str = ap.get("amount")
+        # 4) Direct same-asset deposit: from_amount IS in vault-asset units.
+        if not amt_str and from_token == vault_asset:
+            amt_str = tx.get("from_amount")
+        if not amt_str:
+            # Cross-chain composer w/o stored deposit_amount — we don't have
+            # the actual delivered amount. Skip rather than mis-sum (better
+            # to under-credit cost basis than to inflate it into negative
+            # yields). Going forward save_transaction will populate
+            # `deposit_amount` so this branch only hits historical records.
+            continue
         try:
-            amt = int(amt_str)
+            totals[vid] = totals.get(vid, 0) + int(amt_str)
         except (ValueError, TypeError):
             continue
-        totals[vid] = totals.get(vid, 0) + amt
     # Subtract anything the user has withdrawn (or has in flight as claimable)
     withdrawn = await get_withdrawn_per_vault(user_address)
     for vid, w in withdrawn.items():

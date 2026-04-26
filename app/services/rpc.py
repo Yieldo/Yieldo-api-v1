@@ -73,6 +73,24 @@ def get_token_decimals(chain_id: int, token_address: str) -> int:
     return token.functions.decimals().call()
 
 
+# Per-process cache — share decimals for a given (chain, address) never change
+# at runtime, but reading them every portfolio fetch would be 1 RPC per position.
+_SHARE_DECIMALS_CACHE: dict[tuple[int, str], int] = {}
+
+def get_share_decimals_cached(chain_id: int, share_token_address: str) -> int | None:
+    """Read & cache the share token's decimals(). Returns None on RPC failure
+    so callers can fall back to a sensible default rather than crash."""
+    key = (chain_id, share_token_address.lower())
+    if key in _SHARE_DECIMALS_CACHE:
+        return _SHARE_DECIMALS_CACHE[key]
+    try:
+        d = get_token_decimals(chain_id, share_token_address)
+        _SHARE_DECIMALS_CACHE[key] = int(d)
+        return int(d)
+    except Exception:
+        return None
+
+
 def get_vault_share_price(chain_id: int, vault_address: str) -> tuple[int, int]:
     vault = get_vault_contract(chain_id, vault_address)
     total_assets = vault.functions.totalAssets().call()

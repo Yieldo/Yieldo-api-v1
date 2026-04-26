@@ -83,11 +83,20 @@ async def get_positions(user_address: str, chain_id: int | None = Query(None)):
                 continue
 
             asset_decimals = v.get("asset_decimals", 18)
-            # Most ERC-4626 vaults' share decimals == asset decimals (e.g. 6 for
-            # USDC vaults, 18 for ETH vaults). Hardcoding 18 here was producing
-            # 1e12-times inflated balances on stablecoin vaults — that's how
-            # Upshift Gamma USDC ended up showing $1.15 TRILLION.
-            share_decimals = asset_decimals
+            # Read the actual share token's decimals from chain (cached). Don't
+            # assume — Morpho MetaMorpho vaults use 18-dp shares for 6-dp USDC
+            # assets (offset of 12), while custom vaults like Upshift Gamma USDC
+            # use 6-dp shares. Using the wrong number causes either:
+            #   - hardcoded 18: $1.15T fake portfolio value (the original bug)
+            #   - assumed=asset: redeem(140000) for a $0.14 position that should
+            #     burn 1.4e17 raw shares (the withdraw-shows-nothing bug)
+            from app.services.rpc import get_share_decimals_cached
+            share_token_addr = v.get("share_token") or v["address"]
+            sd = get_share_decimals_cached(v["chain_id"], share_token_addr)
+            # Multi-contract proxies may revert decimals() — fall back to asset
+            # decimals (best guess for that architecture). Standard 4626 vaults
+            # always answer.
+            share_decimals = sd if sd is not None else asset_decimals
             share_balance = str(_shares_from_quantity(zp["quantity"], share_decimals))
 
             # Zerion gives us USD and raw quantity. Convert quantity to asset-unit current_assets

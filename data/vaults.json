@@ -73,7 +73,7 @@
   {"address": "0xFc5126377F0efc0041C0969Ef9BA903Ce67d151e", "name": "Felix USDT0", "chain_id": 999, "asset": "usdt", "type": "morpho"},
   {"address": "0x96c6cbb6251ee1c257b2162ca0f39aa5fa44b1fb", "name": "Hyperbeat Ultra HYPE", "chain_id": 999, "asset": "whype", "type": "morpho"},
   {"address": "0x5e105266db42f78fa814322bce7f388b4c2e61eb", "name": "Hyperbeat USDT", "chain_id": 999, "asset": "usdt", "accepted_assets": ["usdt", "usde", "usr"], "type": "midas"},
-  {"address": "0x441794D6a8F9A3739F5D4E98a728937b33489D29", "name": "liquidHYPE", "chain_id": 999, "asset": "whype", "type": "unsupported"},
+  {"address": "0x441794D6a8F9A3739F5D4E98a728937b33489D29", "name": "liquidHYPE", "chain_id": 999, "asset": "behype", "type": "upshift"},
   {"address": "0xc061d38903b99ac12713b550c2cb44b221674f94", "name": "Hyperbeat Ultra UBTC", "chain_id": 999, "asset": "ubtc", "type": "morpho"},
   {"address": "0x81e064d0eB539de7c3170EDF38C1A42CBd752A76", "name": "Hyperbeat lstHYPE", "chain_id": 999, "asset": "whype", "type": "upshift"},
   {"address": "0xCE2b8e464Fc7b5E58710C24b7e5EBFB6027f29D7", "name": "Yearn OG USDC", "chain_id": 747474, "asset": "usdc", "type": "morpho"},

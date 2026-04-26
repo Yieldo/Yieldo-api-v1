@@ -153,6 +153,7 @@ ASSET_TOKEN_CONFIG: dict[int, dict[str, tuple[str, int]]] = {
         "ubtc": ("0x9FDBdA0A5e284c32744D2f17Ee5c74B284993463", 8),  # uBTC (commonly used on HyperEVM)
         "usde": ("0x5d3a1ff2b6bab83b63cd9ad0787074081a52ef34", 18), # Ethena USDe — accepted by Hyperbeat USDT
         "usr":  ("0x0aD339d66BF4AeD5ce31c64Bc37B3244b6394A77", 18), # Resolv USR — accepted by Hyperbeat USDT
+        "behype": ("0xd8FC8F0b03eBA61F64D08B0bef69d80916E5DdA9", 18), # beHYPE — accepted by Hyperbeat liquidHYPE
     },
     143: {
         # Monad has multiple USDC deployments. This is the one used by Hyperithm,

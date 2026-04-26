@@ -124,7 +124,10 @@ async def withdraw_quote(req: WithdrawQuoteRequest):
 
     to_chain = vault["chain_id"]
     vault_addr = vault["address"]
-    asset = vault["asset_address"]
+    # Some vaults (e.g. Midas HyperBTC: deposit WBTC, redeem cbBTC) settle
+    # withdrawals to a different token than the deposit asset. Use the
+    # redemption_asset when set; otherwise default to deposit asset.
+    asset = vault.get("redemption_asset_address") or vault["asset_address"]
 
     try:
         est_assets = get_vault_convert_to_assets(to_chain, vault_addr, shares)
@@ -180,7 +183,10 @@ async def withdraw_build(req: WithdrawBuildRequest):
 
     to_chain = vault["chain_id"]
     vault_addr = vault["address"]
-    asset = vault["asset_address"]
+    # Some vaults (e.g. Midas HyperBTC: deposit WBTC, redeem cbBTC) settle
+    # withdrawals to a different token than the deposit asset. Use the
+    # redemption_asset when set; otherwise default to deposit asset.
+    asset = vault.get("redemption_asset_address") or vault["asset_address"]
     shares = int(req.shares)
     min_out = int(req.min_amount_out)
     w3 = get_w3(to_chain)

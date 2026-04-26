@@ -54,6 +54,16 @@ def load_vaults():
             logger.warning(f"Skipping vault {vault_id} ({v['name']}): asset unresolvable")
             continue
         asset_addr, asset_decimals = resolved
+        # Some vaults accept asset X for deposit but redeem to a different
+        # asset Y (e.g. Midas HyperBTC: deposits WBTC, redeems cbBTC). When
+        # set, withdraw flows pass redemption_asset as the tokenOut instead
+        # of the deposit asset. Resolved the same way as deposit asset.
+        red_sym = v.get("redemption_asset")
+        red_addr, red_dec = (asset_addr, asset_decimals)
+        if red_sym:
+            r_resolved = _resolve_asset(chain_id, red_sym, v["address"])
+            if r_resolved:
+                red_addr, red_dec = r_resolved
         _vaults[vault_id] = {
             "vault_id": vault_id,
             "name": v["name"],
@@ -69,6 +79,9 @@ def load_vaults():
             "asset_symbol": v["asset"],
             "asset_address": asset_addr,
             "asset_decimals": asset_decimals,
+            "redemption_asset_symbol": red_sym or v["asset"],
+            "redemption_asset_address": red_addr,
+            "redemption_asset_decimals": red_dec,
             "deposit_router": DEPOSIT_ROUTER_ADDRESSES[chain_id],
             "type": v.get("type", "morpho"),
             "min_deposit": v.get("min_deposit"),

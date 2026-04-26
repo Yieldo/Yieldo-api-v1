@@ -52,9 +52,7 @@
               "api-reference/quote",
               "api-reference/status",
               "api-reference/positions",
-              "api-reference/chains-and-tokens",
-              "api-reference/creators",
-              "api-reference/users"
+              "api-reference/chains-and-tokens"
             ]
           },
           {

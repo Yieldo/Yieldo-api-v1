@@ -109,7 +109,7 @@ Once the bridge is `DONE`:
 - **Single-step** — the same LiFi tx on the destination emits the router's `Routed(partnerId, partnerType, user, vault, asset, amount, shares)` event. Indexers can read `shares` directly from the event (V3.1.0).
 - **Two-step** — the user's own step-2 tx emits `Routed(...)` on the destination chain.
 
-The `/v1/deposits` and `/v1/positions` endpoints consume this event for attribution and position display.
+The `/v1/positions` endpoint consumes the same event to power portfolio reads — `Routed` is the canonical record for attribution and position computation.
 
 ## Source Chain Support
 

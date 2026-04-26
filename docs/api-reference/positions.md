@@ -28,8 +28,8 @@ For each known vault (excluding those marked `unsupported`):
 1. Read the user's share balance on-chain via `balanceOf(user)`
 2. Skip if balance is zero
 3. Convert shares to asset units via `vault.convertToAssets(shares)` (falls back to `totalAssets/totalSupply` ratio if unavailable)
-4. Sum historical deposit amounts for this vault from the transactions collection
-5. Compute yield as `current_assets - deposited_assets`
+4. Sum the user's historical net deposits to that vault (deposits − withdrawals) in vault-asset units
+5. Compute yield as `current_assets − deposited_assets`
 
 Values are in the vault asset's smallest unit (e.g. 6 decimals for USDC).
 

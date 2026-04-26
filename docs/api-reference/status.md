@@ -50,12 +50,14 @@ curl "https://api.yieldo.xyz/v1/status?tx_hash=0xabc...&from_chain_id=42161&to_c
 
 ### Status Values
 
-| Status      | Description                                    |
-| ----------- | ---------------------------------------------- |
-| `DONE`      | Transfer completed successfully                |
-| `PENDING`   | Transfer is in progress                        |
-| `FAILED`    | Transfer failed                                |
-| `NOT_FOUND` | Transaction not yet indexed                    |
+| Status      | Description                                                                |
+| ----------- | -------------------------------------------------------------------------- |
+| `DONE`      | Transfer completed AND the user's wallet received a share-mint event       |
+| `PENDING`   | Transfer is in progress                                                    |
+| `FAILED`    | Transfer / deposit reverted on-chain                                       |
+| `NOT_FOUND` | Transaction not yet indexed                                                |
+
+The `DONE` status is verified end-to-end — the API checks the destination receipt for an ERC-20 `Transfer(from=0, to=user, ...)` event of the vault's share token before reporting completion. If the bridge or composer call delivered tokens to the user's wallet but the actual deposit didn't mint shares (e.g. a silent composer drop, or a vault rejected the deposit at the function level), the status stays as `partial` rather than incorrectly reporting `DONE`. See `substatus` for the specific reason.
 
 ### Response Fields
 
@@ -90,4 +92,4 @@ event Routed(
 );
 ```
 
-Filtering this event for `user == <user>` and `vault == <vault>` on the destination chain gives you a definitive on-chain record of the deposit and the exact shares minted. The Yieldo indexer consumes this event to power `/v1/deposits` and `/v1/positions`.
+Filtering this event for `user == <user>` and `vault == <vault>` on the destination chain gives you a definitive on-chain record of the deposit and the exact shares minted. The same event powers `/v1/positions` for portfolio reads.

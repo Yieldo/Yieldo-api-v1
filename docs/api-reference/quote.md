@@ -106,6 +106,18 @@ curl -X POST https://api.yieldo.xyz/v1/quote \
 | `same_chain_swap`  | Same chain, different token — swap via LiFi then deposit       |
 | `cross_chain`      | Different chain — bridge + swap via LiFi then deposit          |
 
+### Multi-Asset Vaults & Smart Routing
+
+Some vaults accept several deposit tokens directly (e.g. **Lido Earn USD** takes both USDT and USDC; **Veda Liquid BTC** takes WBTC + cbBTC + LBTC). The `accepted_assets` array on the vault record lists every supported token.
+
+When choosing the destination/deposit token, the API picks the cheapest path automatically:
+
+1. **Same chain + `from_token` matches an accepted asset** → `direct` (no swap)
+2. **Cross chain + `from_token`'s symbol matches an accepted asset on dest** → bridge same-symbol (e.g. Base USDC → Eth USDC for a USDT/USDC vault — no asset swap during bridge)
+3. **Otherwise** → fall back to the vault's primary `asset`
+
+You don't need to pass anything extra — just submit `from_token` as the user's source token and the API routes accordingly.
+
 ### Estimate Fields
 
 | Field              | Type        | Description                                    |

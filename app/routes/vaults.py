@@ -56,6 +56,10 @@ async def get_vault_detail(vault_id: str):
             "symbol": v["asset_symbol"],
             "decimals": v["asset_decimals"],
         },
+        accepted_assets=[
+            {"address": a["address"], "symbol": a["symbol"], "decimals": a["decimals"]}
+            for a in (v.get("accepted_assets") or [])
+        ],
         deposit_router=v["deposit_router"],
         type=v.get("type", "morpho"),
         min_deposit=str(resolved_min) if resolved_min is not None else None,

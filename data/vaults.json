@@ -40,7 +40,7 @@
   {"address": "0x5a42864b14C0C8241EF5ab62Dae975b163a2E0C1", "name": "Midas HyperETH", "chain_id": 1, "asset": "weth", "type": "midas"},
   {"address": "0x87C9053C819bB28e0D73d33059E1b3DA80AFb0cf", "name": "Midas RE7", "chain_id": 1, "asset": "usdc", "type": "midas"},
   {"address": "0x936FACDf10C8c36294e7B9D28345255539d81bc7", "name": "RockSolid rETH Vault", "chain_id": 1, "asset": "weth", "type": "morpho"},
-  {"address": "0xb09f761cb13baca8ec087ac476647361b6314f98", "name": "Flagship cbBTC", "chain_id": 1, "asset": "wbtc", "type": "morpho"},
+  {"address": "0xb09f761cb13baca8ec087ac476647361b6314f98", "name": "Flagship cbBTC", "chain_id": 1, "asset": "cbbtc", "type": "morpho"},
   {"address": "0x07ed467acD4ffd13023046968b0859781cb90D9B", "name": "9Summits Flagship ETH", "chain_id": 1, "asset": "weth", "type": "custom"},
   {"address": "0xc824A08dB624942c5e5f330d56530cD1598859fD", "name": "Upshift High Growth ETH", "chain_id": 1, "asset": "rseth", "type": "morpho"},
   {"address": "0xe1B4d34E8754600962Cd944B535180Bd758E6c2e", "name": "Upshift Kelp Gain", "chain_id": 1, "asset": "rseth", "type": "morpho"},

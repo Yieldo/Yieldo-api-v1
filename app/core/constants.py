@@ -122,7 +122,8 @@ ASSET_TOKEN_CONFIG: dict[int, dict[str, tuple[str, int]]] = {
         "weth": ("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", 18),
         "wbtc": ("0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", 8),
         "pyusd": ("0x6c3ea9036406852006290770BEdFcAbA0e23A0e8", 6),
-        "usdtb": ("0xC139190F447e929f090edF9bB84c22a9D232dDA2", 18),
+        "usdtb": ("0xC139190F447e929f090Edeb554D95AbB8b18aC1C", 18),  # Ethena USDtb — actual on-chain address (was wrong before)
+        "cbbtc": ("0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf", 8),    # Coinbase BTC on Ethereum — required by Flagship cbBTC vault
         "ausd": ("0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a", 6),
         "eurcv": ("0x5F7827FDeb7c20b443265Fc2F40845B715385Ff2", 18),
         "rseth": ("0xA1290d69c65A6Fe4DF752f95823fae25cB99e5A7", 18),  # Kelp restaked ETH — required by Upshift Kelp Gain & High Growth ETH

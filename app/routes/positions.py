@@ -82,8 +82,13 @@ async def get_positions(user_address: str, chain_id: int | None = Query(None)):
             if not zp:
                 continue
 
-            share_balance = str(_shares_from_quantity(zp["quantity"], 18))
             asset_decimals = v.get("asset_decimals", 18)
+            # Most ERC-4626 vaults' share decimals == asset decimals (e.g. 6 for
+            # USDC vaults, 18 for ETH vaults). Hardcoding 18 here was producing
+            # 1e12-times inflated balances on stablecoin vaults — that's how
+            # Upshift Gamma USDC ended up showing $1.15 TRILLION.
+            share_decimals = asset_decimals
+            share_balance = str(_shares_from_quantity(zp["quantity"], share_decimals))
 
             # Zerion gives us USD and raw quantity. Convert quantity to asset-unit current_assets
             # by using convertToAssets for precision (single RPC call per matched vault, still
@@ -110,6 +115,12 @@ async def get_positions(user_address: str, chain_id: int | None = Query(None)):
             if value_usd is None:
                 value_usd = _usd_fallback(v.get("asset_symbol"), current_assets, asset_decimals)
 
+            # Sanity guard: a single Yieldo position above $1B is implausible.
+            # If Zerion returns garbage (wrong decimals on its side, weird oracle,
+            # mislabeled token), null the value rather than displaying trillions.
+            if value_usd is not None and value_usd > 1_000_000_000:
+                value_usd = None
+
             # Skip dust
             if value_usd is not None and value_usd < _DUST_THRESHOLD_USD:
                 continue
@@ -126,7 +137,7 @@ async def get_positions(user_address: str, chain_id: int | None = Query(None)):
                 asset_address=v.get("asset_address", ""),
                 asset_decimals=asset_decimals,
                 share_balance=share_balance,
-                share_decimals=18,
+                share_decimals=share_decimals,
                 vault_type=v.get("type", "morpho"),
                 current_assets=str(current_assets) if current_assets is not None else None,
                 deposited_assets=str(dep_amt) if dep_amt is not None else None,

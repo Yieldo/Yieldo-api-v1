@@ -65,7 +65,7 @@
   {"address": "0xba8424EBBEd6C51bEa6d6D903B8815838E6a0322", "name": "Steakhouse Prime ETH", "chain_id": 143, "asset": "weth", "type": "morpho"},
   {"address": "0x7Cd231120a60F500887444a9bAF5e1BD753A5e59", "name": "Hyperithm Delta Neutral Vault", "chain_id": 143, "asset": "usdc", "type": "accountable", "min_deposit": "100000000"},
   {"address": "0x3a2c4aAae6776dC1c31316De559598f2f952E2cB", "name": "Yuzu Money Vault", "chain_id": 143, "asset": "usdc", "type": "accountable", "min_deposit": "1000000000"},
-  {"address": "0x36eDbF0C834591BFdfCaC0Ef9605528c75c406aA", "name": "Upshift AUSD", "chain_id": 143, "asset": "ausd", "type": "morpho"},
+  {"address": "0x36eDbF0C834591BFdfCaC0Ef9605528c75c406aA", "share_token": "0x103222f020e98Bba0AD9809A011FDF8e6F067496", "name": "Upshift AUSD", "chain_id": 143, "asset": "ausd", "type": "upshift"},
   {"address": "0x6A37725Ca7F4cE81C004C955F7280D5C704A249E", "share_token": "0xBBFC8683C8fE8cF73777feDE7ab9574935fea0A4", "name": "Lido Earn ETH", "chain_id": 1, "asset": "weth", "type": "lido", "paused": true, "paused_reason": "Lido SyncDepositQueue paused on their side; deposits will resume when Lido unpauses."},
   {"address": "0x014e6dA8F283c4Af65B2aa0F201438680a004452", "share_token": "0x4Ce1ac8F43E0E5BD7A346A98aF777bF8fbeA1981", "name": "Lido Earn USD", "chain_id": 1, "asset": "usdt", "type": "lido"},
   {"address": "0x2900ABd73631b2f60747e687095537B673c06A76", "name": "Felix HYPE", "chain_id": 999, "asset": "whype", "type": "morpho"},

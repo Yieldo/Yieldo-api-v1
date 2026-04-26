@@ -129,6 +129,10 @@ ASSET_TOKEN_CONFIG: dict[int, dict[str, tuple[str, int]]] = {
         "rseth": ("0xA1290d69c65A6Fe4DF752f95823fae25cB99e5A7", 18),  # Kelp restaked ETH — required by Upshift Kelp Gain & High Growth ETH
         "reth":  ("0xae78736Cd615f374D3085123A210448E74Fc6393", 18),  # Rocket Pool ETH — required by RockSolid rETH Vault
         "nusd": ("0xE556ABa6fe6036275Ec1f87eda296BE72C811BCE", 18),  # Neutrl USD — required by Upshift NUSD
+        "weeth":("0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee", 18),  # Ether.fi weETH — accepted by Veda Liquid ETH
+        "lbtc": ("0x8236a87084f8B84306f72007F36F2618A5634494", 8),    # Lombard BTC — accepted by Veda Lombard / Liquid BTC
+        "dai":  ("0x6B175474E89094C44Da98b954EedeAC495271d0F", 18),  # MakerDAO DAI — accepted by several Midas vaults
+        "usds": ("0xdC035D45d973E3EC169d2276DDab16f1e407384F", 18),  # Sky USDS — accepted by Midas Hyperithm/Apollo
     },
     8453: {
         "usdc": ("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", 6),

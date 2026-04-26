@@ -263,14 +263,24 @@ async def build_transaction(req: BuildRequest, request: Request):
         raise HTTPException(status_code=503, detail=f"{vault['name']}: {reason}")
 
     to_chain = vault["chain_id"]
-    to_token = vault["asset_address"]
     deposit_router = vault["deposit_router"]
     # For Mellow/Lido, the router's queue lookup and share forwarding are keyed
     # by the share token, NOT the orchestrator vault address. For ERC-4626 etc.
     # the deposit_target is just the vault address.
     deposit_target = vault.get("share_token") or vault["address"]
     is_same_chain = req.from_chain_id == to_chain
-    is_same_token = req.from_token.lower() == to_token.lower()
+    # Vaults can accept multiple deposit assets (e.g. Lido Earn USD accepts
+    # USDT and USDC — both queues are wired on-chain). If the user's input
+    # token matches any accepted asset, treat as direct (no swap). Otherwise
+    # default to the primary asset and route via LiFi for swap/bridge.
+    accepted = vault.get("accepted_assets") or [{"address": vault["asset_address"], "decimals": vault["asset_decimals"], "symbol": vault["asset_symbol"]}]
+    matched = next((a for a in accepted if a["address"].lower() == req.from_token.lower()), None)
+    if matched:
+        to_token = matched["address"]
+        is_same_token = True
+    else:
+        to_token = vault["asset_address"]
+        is_same_token = req.from_token.lower() == to_token.lower()
     is_direct = is_same_chain and is_same_token
     from_amount_int = int(req.from_amount)
 

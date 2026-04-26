@@ -22,6 +22,10 @@ class VaultResponse(BaseModel):
     chain_id: int
     chain_name: str
     asset: AssetInfo
+    # Some vaults accept multiple deposit tokens directly without swap
+    # (e.g. Lido Earn USD: USDT or USDC). Frontend uses this to surface
+    # all of them as one-click direct-deposit options. Defaults to [asset].
+    accepted_assets: list[AssetInfo] = []
     deposit_router: str
     type: str = "morpho"
     min_deposit: Optional[str] = None

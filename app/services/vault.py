@@ -64,6 +64,18 @@ def load_vaults():
             r_resolved = _resolve_asset(chain_id, red_sym, v["address"])
             if r_resolved:
                 red_addr, red_dec = r_resolved
+
+        # Vaults that accept multiple deposit assets (e.g. Lido Earn USD
+        # accepts both USDT and USDC — router has lidoDepositQueues set up
+        # for both). When set, the quote endpoint treats ANY of these as a
+        # direct-deposit token (no swap needed) and the deposit modal
+        # surfaces all of them as one-click options. Defaults to [asset].
+        accepted_syms = v.get("accepted_assets") or [v["asset"]]
+        accepted = []
+        for sym in accepted_syms:
+            res = _resolve_asset(chain_id, sym, v["address"])
+            if res:
+                accepted.append({"symbol": sym, "address": res[0], "decimals": res[1]})
         _vaults[vault_id] = {
             "vault_id": vault_id,
             "name": v["name"],
@@ -82,6 +94,7 @@ def load_vaults():
             "redemption_asset_symbol": red_sym or v["asset"],
             "redemption_asset_address": red_addr,
             "redemption_asset_decimals": red_dec,
+            "accepted_assets": accepted,  # [{symbol, address, decimals}, ...]
             "deposit_router": DEPOSIT_ROUTER_ADDRESSES[chain_id],
             "type": v.get("type", "morpho"),
             "min_deposit": v.get("min_deposit"),
@@ -246,6 +259,8 @@ def _to_response(v: dict) -> VaultResponse:
             symbol=v["asset_symbol"],
             decimals=v["asset_decimals"],
         ),
+        accepted_assets=[AssetInfo(address=a["address"], symbol=a["symbol"], decimals=a["decimals"])
+                         for a in (v.get("accepted_assets") or [])],
         deposit_router=v["deposit_router"],
         type=v.get("type", "morpho"),
         min_deposit=str(resolved_min) if resolved_min is not None else None,

@@ -61,6 +61,7 @@
               "guides/deposit-flow",
               "guides/cross-chain-deposits",
               "guides/deposit-router-contracts",
+              "guides/embed-badges",
               "guides/error-handling"
             ]
           }

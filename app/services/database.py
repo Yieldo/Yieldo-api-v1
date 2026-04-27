@@ -18,28 +18,64 @@ logger = logging.getLogger(__name__)
 
 _client: Optional[AsyncIOMotorClient] = None
 _db = None
+# `_indexer_client` / `_indexer_db` point at the indexer's `yieldo_v1` database.
+# The indexer runs on a different Mongo cluster than the wallet API, so this is
+# a SEPARATE motor client. Used for read-only access to vault metrics, snapshots,
+# score_snapshots, and score_anomalies written by indexer-v1.
+_indexer_client: Optional[AsyncIOMotorClient] = None
+_indexer_db = None
 
 
-async def connect(url: str):
-    global _client, _db
+async def connect(url: str, indexer_url: Optional[str] = None):
+    global _client, _db, _indexer_client, _indexer_db
     try:
         _client = AsyncIOMotorClient(url)
         _db = _client["yieldo_wallets"]
         await _ensure_indexes()
-        logger.info("MongoDB connected")
+        logger.info("MongoDB connected (yieldo_wallets)")
     except Exception as e:
         logger.error(f"MongoDB connection failed: {e}")
         _client = None
         _db = None
 
+    # Indexer DB is on a separate cluster (different connection string).
+    target = indexer_url or url
+    if not target:
+        logger.warning("No indexer Mongo URL — score endpoints will return 503")
+        return
+    try:
+        _indexer_client = AsyncIOMotorClient(target)
+        _indexer_db = _indexer_client["yieldo_v1"]
+        # Smoke check
+        await _indexer_db.command("ping")
+        logger.info("Indexer MongoDB connected (yieldo_v1, read-only)")
+    except Exception as e:
+        logger.error(f"Indexer MongoDB connection failed: {e}")
+        _indexer_client = None
+        _indexer_db = None
+
+
+def get_indexer_db():
+    """Read-only handle on the indexer's `yieldo_v1` database.
+
+    Used by /v1/scores/* endpoints to read score_snapshots, score_anomalies,
+    snapshots, and vaults written by indexer-v1. Returns None if the API hasn't
+    connected to Mongo yet (set in lifespan startup).
+    """
+    return _indexer_db
+
 
 async def disconnect():
-    global _client, _db
+    global _client, _db, _indexer_client, _indexer_db
     if _client:
         _client.close()
         _client = None
         _db = None
-        logger.info("MongoDB disconnected")
+    if _indexer_client:
+        _indexer_client.close()
+        _indexer_client = None
+        _indexer_db = None
+    logger.info("MongoDB disconnected")
 
 
 async def _ensure_indexes():

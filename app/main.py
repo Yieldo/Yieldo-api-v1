@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import vaults, quote, status, info, partners, kols, deposits, users, withdraw, positions
+from app.routes import vaults, quote, status, info, partners, kols, deposits, users, withdraw, positions, scores
 from app.services.vault import load_vaults, get_all_vaults_raw, start_registry_audit_thread
 from app.services import database, min_deposit, status_resolver
 from app.config import get_settings
@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
     ).start()
     settings = get_settings()
     if settings.mongodb_url:
-        await database.connect(settings.mongodb_url)
+        await database.connect(settings.mongodb_url, settings.indexer_mongodb_url or None)
         # Backfill ref_codes for any existing users that predate the feature.
         try:
             await database.backfill_user_ref_codes()
@@ -82,6 +82,7 @@ app.include_router(deposits.router)
 app.include_router(users.router)
 app.include_router(withdraw.router)
 app.include_router(positions.router)
+app.include_router(scores.router)
 
 
 @app.get("/health")

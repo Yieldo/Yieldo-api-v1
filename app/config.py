@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     hyperliquid_rpc_url: str = "https://rpc.hyperliquid.xyz/evm"
     katana_rpc_url: str = "https://rpc.katanarpc.com"
     mongodb_url: str = ""
+    # The indexer (indexer-v1) writes to a different Mongo cluster — score
+    # endpoints read from that cluster. If not set, falls back to mongodb_url.
+    indexer_mongodb_url: str = ""
     intent_deadline_seconds: int = 3600
     signer_private_key: str = ""
     zerion_api_key: str = ""

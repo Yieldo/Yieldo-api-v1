@@ -120,32 +120,32 @@ def encode_deposit_for_calldata(
     partner_type: int,
     is_erc4626: bool,
     min_shares_out: int | None = None,
+    deadline: int | None = None,
 ) -> str:
-    """Build depositFor calldata. V3.1.x accepts an 8-arg variant with minSharesOut slippage
-    protection; V3.0.0 only accepts the 7-arg variant. Pass None (default) to use the 7-arg form
-    for backward compatibility; pass an int (including 0) to use the 8-arg form."""
+    """Build depositFor calldata. ABI shape is picked by arg count:
+      - 7-arg = V3.0 shim (no slippage, no expiration)
+      - 8-arg = V3.1 shim (slippage; deadline forwarded as 0)
+      - 9-arg = V3.3 primary (slippage + expiration — audit M-04)
+
+    Pass `deadline` (unix seconds) to enable stale-mempool protection on V3.3+.
+    Pass None (default) for backward-compat with pre-V3.3 routers."""
     router = get_deposit_router(chain_id)
-    if min_shares_out is None:
-        args = [
-            Web3.to_checksum_address(vault),
-            Web3.to_checksum_address(asset),
-            amount,
-            Web3.to_checksum_address(user),
-            partner_id,
-            partner_type,
-            is_erc4626,
-        ]
+    base_args = [
+        Web3.to_checksum_address(vault),
+        Web3.to_checksum_address(asset),
+        amount,
+        Web3.to_checksum_address(user),
+        partner_id,
+        partner_type,
+        is_erc4626,
+    ]
+    if deadline is not None:
+        # 9-arg V3.3+ primary
+        args = base_args + [min_shares_out or 0, deadline]
+    elif min_shares_out is not None:
+        args = base_args + [min_shares_out]
     else:
-        args = [
-            Web3.to_checksum_address(vault),
-            Web3.to_checksum_address(asset),
-            amount,
-            Web3.to_checksum_address(user),
-            partner_id,
-            partner_type,
-            is_erc4626,
-            min_shares_out,
-        ]
+        args = base_args
     return router.encode_abi(abi_element_identifier="depositFor", args=args)
 
 
@@ -159,25 +159,26 @@ def encode_deposit_for_available_calldata(
     is_erc4626: bool,
     min_amount: int = 0,
     min_shares_out: int = 0,
+    deadline: int | None = None,
 ) -> str:
     """V3.2.0+ composer-friendly entry: pulls min(allowance, balance) from msg.sender,
     so cross-chain composer flows don't need a hardcoded amount that bridge fees might
     underflow. The caller (e.g. LiFi Executor) approves the router for the exact
-    post-bridge amount before invoking us."""
+    post-bridge amount before invoking us. V3.3 adds `deadline` for stale-mempool
+    protection (audit M-04)."""
     router = get_deposit_router(chain_id)
-    return router.encode_abi(
-        abi_element_identifier="depositForAvailable",
-        args=[
-            Web3.to_checksum_address(vault),
-            Web3.to_checksum_address(asset),
-            Web3.to_checksum_address(user),
-            partner_id,
-            partner_type,
-            is_erc4626,
-            min_amount,
-            min_shares_out,
-        ],
-    )
+    base_args = [
+        Web3.to_checksum_address(vault),
+        Web3.to_checksum_address(asset),
+        Web3.to_checksum_address(user),
+        partner_id,
+        partner_type,
+        is_erc4626,
+        min_amount,
+        min_shares_out,
+    ]
+    args = base_args + [deadline] if deadline is not None else base_args
+    return router.encode_abi(abi_element_identifier="depositForAvailable", args=args)
 
 
 def encode_deposit_request_for_calldata(
@@ -188,19 +189,19 @@ def encode_deposit_request_for_calldata(
     user: str,
     partner_id: bytes,
     partner_type: int,
+    deadline: int | None = None,
 ) -> str:
     router = get_deposit_router(chain_id)
-    return router.encode_abi(
-        abi_element_identifier="depositRequestFor",
-        args=[
-            Web3.to_checksum_address(vault),
-            Web3.to_checksum_address(asset),
-            amount,
-            Web3.to_checksum_address(user),
-            partner_id,
-            partner_type,
-        ],
-    )
+    base_args = [
+        Web3.to_checksum_address(vault),
+        Web3.to_checksum_address(asset),
+        amount,
+        Web3.to_checksum_address(user),
+        partner_id,
+        partner_type,
+    ]
+    args = base_args + [deadline] if deadline is not None else base_args
+    return router.encode_abi(abi_element_identifier="depositRequestFor", args=args)
 
 
 def sign_withdraw_intent(

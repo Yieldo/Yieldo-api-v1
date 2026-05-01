@@ -1,3 +1,4 @@
+import time
 from web3 import Web3
 from fastapi import APIRouter, HTTPException, Request
 from app.models import (
@@ -332,10 +333,19 @@ async def build_transaction(req: BuildRequest, request: Request):
     partner_id = _partner_id_bytes(req.partner_id)
     partner_type = req.partner_type
 
+    # Audit M-04: deposit deadlines protect against tx stuck in mempool then
+    # mining at stale vault state. 1h for direct same-chain (user signs and
+    # broadcasts immediately); 6h for composer / two-step where cross-chain
+    # bridging itself can take 30+ min before the deposit step lands.
+    now_ts = int(time.time())
+    direct_deadline = now_ts + 3600          # 1 hour
+    composer_deadline = now_ts + 6 * 3600    # 6 hours
+
     if is_direct:
         calldata = encode_deposit_for_calldata(
             to_chain, deposit_target, to_token, from_amount_int,
             req.user_address, partner_id, partner_type, is_erc4626,
+            min_shares_out=0, deadline=direct_deadline,
         )
         response = BuildResponse(
             transaction_request=TransactionRequest(
@@ -406,7 +416,7 @@ async def build_transaction(req: BuildRequest, request: Request):
         cc_calldata = encode_deposit_for_available_calldata(
             to_chain, deposit_target, to_token,
             req.user_address, partner_id, partner_type, is_erc4626,
-            min_amount=0, min_shares_out=0,
+            min_amount=0, min_shares_out=0, deadline=composer_deadline,
         )
         cc_quote = await lifi.get_contract_calls_quote(
             req.from_chain_id, req.from_token, req.from_amount,
@@ -444,6 +454,7 @@ async def build_transaction(req: BuildRequest, request: Request):
         dep_calldata = encode_deposit_for_calldata(
             to_chain, deposit_target, to_token, dep_amount,
             req.user_address, partner_id, partner_type, is_erc4626,
+            min_shares_out=0, deadline=composer_deadline,
         )
 
         response = BuildResponse(

@@ -197,13 +197,28 @@ def _refresh_registry() -> None:
 def audit_against_registry() -> dict:
     """Diff vaults.json (us) vs the public registry (frontend) — log every drift
     so we hear about it BEFORE a user does. Returns a structured report so an
-    optional /v1/vaults/integrity endpoint or startup hook can surface it."""
+    optional /v1/vaults/integrity endpoint or startup hook can surface it.
+
+    Vaults on chains where we don't have a deposit router are filtered out: they
+    can never accept deposits through us regardless of vaults.json status, so
+    they're irrelevant to the user-facing drift this check exists to catch.
+    Indexer-only vaults on those chains (analytics / scoring only) are tracked
+    separately for visibility."""
     if not _REGISTRY_FETCHED[0]:
         _refresh_registry()
     in_us = set(_vaults.keys())
-    in_registry = set(_REGISTRY_CACHE.keys())
-    only_us = sorted(in_us - in_registry)
-    only_registry = sorted(in_registry - in_us)
+
+    def _on_supported_chain(vid: str) -> bool:
+        try:
+            return int(vid.split(":", 1)[0]) in DEPOSIT_ROUTER_ADDRESSES
+        except (ValueError, IndexError):
+            return False
+
+    in_registry_supported = {v for v in _REGISTRY_CACHE.keys() if _on_supported_chain(v)}
+    in_registry_unsupported_chain = {v for v in _REGISTRY_CACHE.keys() if not _on_supported_chain(v)}
+
+    only_us = sorted(in_us - in_registry_supported)
+    only_registry = sorted(in_registry_supported - in_us)
     # Drift signal: same vault id present in both is fine. The user-impacting bug is
     # an id in the registry that we don't have — that's what makes deposits fail.
     if only_registry:
@@ -218,11 +233,19 @@ def audit_against_registry() -> dict:
             f"(probably newer entries we added manually before indexer caught up): "
             f"{', '.join(only_us[:10])}{'...' if len(only_us) > 10 else ''}"
         )
+    if in_registry_unsupported_chain:
+        sample = ", ".join(sorted(in_registry_unsupported_chain)[:5])
+        logger.info(
+            f"{len(in_registry_unsupported_chain)} indexer-only vaults on chains "
+            f"without a deposit router (analytics/scoring only — deposits not supported): "
+            f"{sample}{'...' if len(in_registry_unsupported_chain) > 5 else ''}"
+        )
     return {
         "vaults_json_total": len(in_us),
-        "registry_total": len(in_registry),
+        "registry_total": len(_REGISTRY_CACHE),
         "missing_from_vaults_json": only_registry,
         "missing_from_registry": only_us,
+        "analytics_only_chains": sorted(in_registry_unsupported_chain),
     }
 
 

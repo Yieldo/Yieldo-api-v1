@@ -18,10 +18,13 @@ class Settings(BaseSettings):
     intent_deadline_seconds: int = 3600
     signer_private_key: str = ""
     zerion_api_key: str = ""
+    # Admin key for /v1/applications admin endpoints (list/approve/reject).
+    # Set via .env on the VPS — never commit. Empty value disables admin endpoints.
     yieldo_admin_key: str = ""
 
     class Config:
         env_file = ".env"
+        extra = "ignore"  # tolerate other unknown env vars (e.g. ops/secret rotation)
 
 
 @lru_cache()

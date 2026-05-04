@@ -16,7 +16,6 @@ Endpoints:
 """
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -24,6 +23,7 @@ from fastapi import APIRouter, HTTPException, Header, Request
 from pydantic import BaseModel, EmailStr, Field
 
 from app.core.auth import generate_nonce, verify_signature
+from app.config import get_settings
 from app.services import database
 
 router = APIRouter(prefix="/v1/applications", tags=["applications"])
@@ -41,9 +41,9 @@ def build_application_message(audience: str, address: str, nonce: str) -> str:
 
 
 def _admin_guard(x_admin_key: Optional[str]) -> None:
-    expected = os.environ.get("YIELDO_ADMIN_KEY")
+    expected = get_settings().yieldo_admin_key
     if not expected:
-        raise HTTPException(503, "Admin operations are not configured (set YIELDO_ADMIN_KEY)")
+        raise HTTPException(503, "Admin operations are not configured (set YIELDO_ADMIN_KEY in .env)")
     if not x_admin_key or x_admin_key != expected:
         raise HTTPException(401, "Invalid admin key")
 

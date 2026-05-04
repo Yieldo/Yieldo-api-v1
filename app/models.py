@@ -295,6 +295,10 @@ class PartnerRegisterRequest(BaseModel):
     website: str = ""
     contact_email: str = ""
     description: str = ""
+    # Optional: the exact nonce the client signed. When provided, backend
+    # validates the signature against THIS specific nonce instead of the
+    # latest-in-DB. Eliminates races between concurrent /nonce calls.
+    nonce: str | None = None
 
 
 class PartnerRegisterResponse(BaseModel):
@@ -304,11 +308,16 @@ class PartnerRegisterResponse(BaseModel):
     api_secret: str
     api_key_prefix: str
     created_at: str
+    # Optional session token issued atomically with registration so the
+    # caller doesn't need a second signature for /login.
+    session_token: str | None = None
+    expires_at: str | None = None
 
 
 class PartnerLoginRequest(BaseModel):
     address: str
     signature: str
+    nonce: str | None = None  # see PartnerRegisterRequest.nonce
 
 
 class PartnerLoginResponse(BaseModel):

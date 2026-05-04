@@ -98,8 +98,10 @@ async def register(req: PartnerRegisterRequest):
     if app_doc.get("status") != "approved":
         raise HTTPException(status_code=403, detail="Application not approved.")
 
-    # Verify nonce exists
-    nonce = await database.get_and_delete_nonce(req.address)
+    # If client passed an explicit nonce, validate signature against it AND
+    # remove that specific nonce from the DB. Otherwise fall back to "use
+    # whatever nonce is latest" (legacy behavior, susceptible to races).
+    nonce = req.nonce if req.nonce else await database.get_and_delete_nonce(req.address)
     if not nonce:
         raise HTTPException(status_code=400, detail="No pending nonce. Request /nonce first.")
 
@@ -107,6 +109,11 @@ async def register(req: PartnerRegisterRequest):
     message = build_register_message(req.address, nonce)
     if not verify_signature(req.address, message, req.signature):
         raise HTTPException(status_code=401, detail="Invalid signature")
+
+    # If we used an explicit client-supplied nonce, also clear any other
+    # nonces sitting in DB for this address so they can't be replayed.
+    if req.nonce:
+        await database.delete_nonces_for_address(req.address)
 
     # Generate API credentials
     raw_key, key_hash = generate_api_key()
@@ -124,6 +131,12 @@ async def register(req: PartnerRegisterRequest):
         api_key_prefix=prefix,
     )
 
+    # Issue a session token alongside registration so the client doesn't
+    # need a second signature for /login.
+    token = generate_session_token()
+    expires = datetime.now(timezone.utc) + timedelta(hours=SESSION_DURATION_HOURS)
+    await database.save_session(hash_key(token), req.address, expires)
+
     return PartnerRegisterResponse(
         address=partner["address"],
         name=partner["name"],
@@ -131,6 +144,8 @@ async def register(req: PartnerRegisterRequest):
         api_secret=raw_secret,
         api_key_prefix=prefix,
         created_at=partner["created_at"].isoformat(),
+        session_token=token,
+        expires_at=expires.isoformat(),
     )
 
 
@@ -141,13 +156,16 @@ async def login(req: PartnerLoginRequest):
     if not partner:
         raise HTTPException(status_code=404, detail="Partner not found. Register first.")
 
-    nonce = await database.get_and_delete_nonce(req.address)
+    nonce = req.nonce if req.nonce else await database.get_and_delete_nonce(req.address)
     if not nonce:
         raise HTTPException(status_code=400, detail="No pending nonce. Request /nonce first.")
 
     message = build_login_message(req.address, nonce)
     if not verify_signature(req.address, message, req.signature):
         raise HTTPException(status_code=401, detail="Invalid signature")
+
+    if req.nonce:
+        await database.delete_nonces_for_address(req.address)
 
     # Create session
     token = generate_session_token()

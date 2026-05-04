@@ -621,6 +621,16 @@ async def get_and_delete_nonce(address: str) -> Optional[str]:
     return doc["nonce"] if doc else None
 
 
+async def delete_nonces_for_address(address: str) -> int:
+    """Wipe all pending nonces for an address. Used after a successful
+    register/login that consumed a client-supplied nonce — prevents stale
+    sibling nonces from being replayed by a concurrent attempt."""
+    if _db is None:
+        return 0
+    result = await _db["partner_nonces"].delete_many({"address": address.lower()})
+    return result.deleted_count
+
+
 async def create_partner(
     address: str, name: str, website: str, contact_email: str,
     description: str, api_key_hash: str, api_secret_hash: str,

@@ -291,7 +291,11 @@ class PartnerNonceResponse(BaseModel):
 class PartnerRegisterRequest(BaseModel):
     address: str
     signature: str
-    name: str
+    # All four are optional — when omitted, the backend pulls form_data from
+    # the approved application (company → name, email → contact_email, etc.)
+    # so callers don't need to re-collect data already submitted in the apply
+    # form. Only set these explicitly to override application data.
+    name: str = ""
     website: str = ""
     contact_email: str = ""
     description: str = ""

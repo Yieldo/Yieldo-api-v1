@@ -120,12 +120,22 @@ async def register(req: PartnerRegisterRequest):
     raw_secret, secret_hash = generate_api_secret()
     prefix = key_prefix(raw_key)
 
+    # Pull missing fields from the approved application's form_data so the
+    # client doesn't have to re-collect data the user already submitted.
+    form_data = (app_doc.get("form_data") or {}) if app_doc else {}
+    derived_description = " · ".join(p for p in [
+        f"Role: {form_data.get('role')}" if form_data.get("role") else None,
+        f"MAU: {form_data.get('mau')}" if form_data.get("mau") else None,
+        f"Chains: {', '.join(form_data['chains'])}" if form_data.get("chains") else None,
+        f"Telegram: {form_data.get('telegram')}" if form_data.get("telegram") else None,
+    ] if p)
+
     partner = await database.create_partner(
         address=req.address,
-        name=req.name,
-        website=req.website,
-        contact_email=req.contact_email,
-        description=req.description,
+        name=req.name or form_data.get("company") or "Wallet Partner",
+        website=req.website or form_data.get("website", ""),
+        contact_email=req.contact_email or form_data.get("email", ""),
+        description=req.description or derived_description,
         api_key_hash=key_hash,
         api_secret_hash=secret_hash,
         api_key_prefix=prefix,

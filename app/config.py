@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     intent_deadline_seconds: int = 3600
     signer_private_key: str = ""
     zerion_api_key: str = ""
+    yieldo_admin_key: str = ""
 
     class Config:
         env_file = ".env"

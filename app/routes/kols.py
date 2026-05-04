@@ -103,19 +103,34 @@ async def register(req: KolRegisterRequest):
     if existing_kol:
         raise HTTPException(status_code=409, detail="Address already registered as a Creator")
 
-    # Gate: require either a valid invite code OR tier-2 organic unlock (10+ depositing referrals)
+    # Gate: require an approved application OR a valid invite code OR tier-2
+    # organic unlock (10+ depositing referrals). Application path is the
+    # primary flow; invite code is kept for legacy hand-out scenarios.
     invite_code = (req.invite_code or "").strip().upper()
     invite_doc = None
-    if invite_code:
+
+    app_doc = await database.get_application(req.address, "creator")
+    has_approved_application = app_doc and app_doc.get("status") == "approved"
+
+    if has_approved_application:
+        pass  # approved — allow through
+    elif invite_code:
         invite_doc = await database.verify_invite_code(invite_code)
         if not invite_doc:
             raise HTTPException(status_code=400, detail="Invalid or already-used invite code")
+    elif app_doc and app_doc.get("status") == "pending":
+        raise HTTPException(
+            status_code=403,
+            detail="Your application is under review. We'll respond within 48 hours.",
+        )
+    elif app_doc and app_doc.get("status") == "rejected":
+        raise HTTPException(status_code=403, detail="Application was rejected.")
     else:
         depositing = await database.count_unique_depositing_referrals(req.address)
         if depositing < 10:
             raise HTTPException(
                 status_code=403,
-                detail="Creator access is invite-only. Enter an invite code or refer 10+ depositing users to unlock.",
+                detail="Creator access is invite-only. Submit an application at /v1/applications/creator, enter an invite code, or refer 10+ depositing users to unlock.",
             )
 
     # Validate handle

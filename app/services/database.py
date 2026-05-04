@@ -143,6 +143,15 @@ async def _ensure_indexes():
         creator_apps = _db["creator_applications"]
         await creator_apps.create_index("address", unique=True)
         await creator_apps.create_index("status")
+        # Unified applications (wallet + creator) — invite-only review queue.
+        applications = _db["applications"]
+        await applications.create_index([("address", 1), ("audience", 1)], unique=True)
+        await applications.create_index("status")
+        await applications.create_index("created_at")
+        # Application-flow nonces (SIWE proof of address ownership)
+        app_nonces = _db["application_nonces"]
+        await app_nonces.create_index("address")
+        await app_nonces.create_index("created_at", expireAfterSeconds=300)
         # User indexes
         users = _db["users"]
         await users.create_index("address", unique=True)
@@ -1246,3 +1255,104 @@ async def delete_all_users():
     await _db["users"].delete_many({})
     await _db["user_sessions"].delete_many({})
     await _db["user_nonces"].delete_many({})
+
+
+# --------------------------------------------------------------------------
+# Applications (unified wallet + creator review queue)
+# --------------------------------------------------------------------------
+
+async def save_application_nonce(address: str, nonce: str) -> None:
+    if _db is None:
+        return
+    await _db["application_nonces"].insert_one({
+        "address": address.lower(),
+        "nonce": nonce,
+        "created_at": datetime.now(timezone.utc),
+    })
+
+
+async def get_and_delete_application_nonce(address: str) -> Optional[str]:
+    if _db is None:
+        return None
+    doc = await _db["application_nonces"].find_one_and_delete(
+        {"address": address.lower()},
+        sort=[("created_at", -1)],
+    )
+    return doc.get("nonce") if doc else None
+
+
+async def get_application(address: str, audience: str) -> Optional[dict]:
+    if _db is None:
+        return None
+    return await _db["applications"].find_one({
+        "address": address.lower(),
+        "audience": audience,
+    })
+
+
+async def get_any_application(address: str) -> Optional[dict]:
+    """Returns the most recent non-rejected application across audiences,
+    used for mutex (block applying for the other audience)."""
+    if _db is None:
+        return None
+    return await _db["applications"].find_one(
+        {"address": address.lower(), "status": {"$in": ["pending", "approved"]}},
+        sort=[("created_at", -1)],
+    )
+
+
+async def save_application(
+    address: str, audience: str, form_data: dict
+) -> str:
+    if _db is None:
+        return None
+    now = datetime.now(timezone.utc)
+    doc = {
+        "address": address.lower(),
+        "audience": audience,
+        "form_data": form_data,
+        "status": "pending",
+        "created_at": now,
+        "updated_at": now,
+    }
+    result = await _db["applications"].insert_one(doc)
+    return str(result.inserted_id)
+
+
+async def list_applications(
+    status: Optional[str] = None,
+    audience: Optional[str] = None,
+    limit: int = 100,
+) -> list[dict]:
+    if _db is None:
+        return []
+    q: dict = {}
+    if status:
+        q["status"] = status
+    if audience:
+        q["audience"] = audience
+    cursor = _db["applications"].find(q).sort("created_at", -1).limit(limit)
+    return await cursor.to_list(length=limit)
+
+
+async def update_application_status(
+    address: str, audience: str, status: str, *, note: str = ""
+) -> bool:
+    if _db is None:
+        return False
+    now = datetime.now(timezone.utc)
+    update = {"$set": {
+        "status": status,
+        "updated_at": now,
+    }}
+    if status == "approved":
+        update["$set"]["approved_at"] = now
+    elif status == "rejected":
+        update["$set"]["rejected_at"] = now
+    if note:
+        update["$set"]["admin_note"] = note
+    result = await _db["applications"].update_one(
+        {"address": address.lower(), "audience": audience},
+        update,
+    )
+    return result.modified_count > 0

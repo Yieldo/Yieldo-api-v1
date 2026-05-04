@@ -70,11 +70,33 @@ async def get_nonce(req: PartnerNonceRequest):
 
 @router.post("/register", response_model=PartnerRegisterResponse)
 async def register(req: PartnerRegisterRequest):
-    """Register a new wallet partner with signature verification."""
+    """Register a new wallet partner with signature verification.
+
+    Wallet partner registration is invite-only — the address must have an
+    approved application (status='approved' in `applications` collection).
+    Apply via /v1/applications/wallet first.
+    """
     # Check uniqueness
     existing = await database.get_partner_by_address(req.address)
     if existing:
         raise HTTPException(status_code=409, detail="Address already registered")
+
+    # Application gate
+    app_doc = await database.get_application(req.address, "wallet")
+    if not app_doc:
+        raise HTTPException(
+            status_code=403,
+            detail="Wallet partner registration is invite-only. Submit an application at /v1/applications/wallet first.",
+        )
+    if app_doc.get("status") == "pending":
+        raise HTTPException(
+            status_code=403,
+            detail="Your application is under review. We'll respond within 48 hours.",
+        )
+    if app_doc.get("status") == "rejected":
+        raise HTTPException(status_code=403, detail="Application was rejected.")
+    if app_doc.get("status") != "approved":
+        raise HTTPException(status_code=403, detail="Application not approved.")
 
     # Verify nonce exists
     nonce = await database.get_and_delete_nonce(req.address)

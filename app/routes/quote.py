@@ -21,6 +21,7 @@ from app.core.constants import (
     lifi_approval_target,
 )
 from app.services.vault import get_vault, get_vault_response
+from app.routes.admin import get_vault_flags
 from app.services.rpc import (
     get_vault_share_price,
     encode_deposit_for_calldata,
@@ -111,6 +112,11 @@ async def get_quote(req: QuoteRequest, request: Request):
 
     if vault.get("type") == "unsupported":
         raise HTTPException(status_code=400, detail=f"{vault['name']}: deposits temporarily unavailable. Please check back soon.")
+
+    # Admin-disabled? Vault disabled OR deposits explicitly off → reject.
+    flags = await get_vault_flags(req.vault_id)
+    if not flags["enabled"] or not flags["deposits_enabled"]:
+        raise HTTPException(status_code=400, detail=f"{vault['name']}: deposits are temporarily disabled.")
 
     to_chain = vault["chain_id"]
     deposit_router = vault["deposit_router"]
@@ -305,6 +311,9 @@ async def build_transaction(req: BuildRequest, request: Request):
     if vault.get("paused"):
         reason = vault.get("paused_reason") or "Deposits temporarily paused."
         raise HTTPException(status_code=503, detail=f"{vault['name']}: {reason}")
+    flags = await get_vault_flags(req.vault_id)
+    if not flags["enabled"] or not flags["deposits_enabled"]:
+        raise HTTPException(status_code=400, detail=f"{vault['name']}: deposits are temporarily disabled.")
 
     to_chain = vault["chain_id"]
     deposit_router = vault["deposit_router"]

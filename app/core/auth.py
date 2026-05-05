@@ -81,3 +81,14 @@ def build_user_login_message(address: str, nonce: str) -> str:
         f"Address: {address}\n"
         f"Nonce: {nonce}"
     )
+
+
+def build_admin_login_message(address: str, nonce: str) -> str:
+    """Admin SIWE message — distinct text so a signature obtained for
+    user/partner login can never be replayed against admin endpoints."""
+    return (
+        f"Sign this message to access the Yieldo Admin Console.\n\n"
+        f"Only sign this on https://app.yieldo.xyz/admin if you are an authorized admin.\n\n"
+        f"Address: {address}\n"
+        f"Nonce: {nonce}"
+    )

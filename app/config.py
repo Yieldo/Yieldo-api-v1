@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     # Set via .env on the VPS — never commit. Empty value disables admin endpoints.
     yieldo_admin_key: str = ""
 
+    # /v1/admin (vault toggle dashboard) password. Required alongside a SIWE
+    # signature from one of the wallets in `yieldo_admin_wallets`. Both checks
+    # must pass — password proves "you have the shared secret", signature
+    # proves "you control the wallet". Empty = admin disabled.
+    yieldo_admin_password: str = ""
+    # Comma-separated list of admin wallet addresses (lowercase, 0x...).
+    # Add more by appending in the .env file — no code change needed.
+    yieldo_admin_wallets: str = "0x7e14104e2433fde49c98008911298f069c9de41a"
+
     class Config:
         env_file = ".env"
         extra = "ignore"  # tolerate other unknown env vars (e.g. ops/secret rotation)

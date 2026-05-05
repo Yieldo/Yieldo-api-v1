@@ -26,6 +26,7 @@ from app.core.constants import CHAIN_CONFIG
 from app.services.rpc import get_vault_convert_to_assets, get_w3
 from app.services.vault import get_vault, get_vault_response
 from app.services import database
+from app.routes.admin import get_vault_flags
 
 router = APIRouter(prefix="/v1/withdraw", tags=["withdraw"])
 
@@ -110,6 +111,9 @@ async def withdraw_quote(req: WithdrawQuoteRequest):
         raise HTTPException(status_code=404, detail=f"Vault {req.vault_id} not found")
     if vault.get("type") == "unsupported":
         raise HTTPException(status_code=400, detail=f"{vault['name']}: withdrawals temporarily unavailable.")
+    flags = await get_vault_flags(req.vault_id)
+    if not flags["enabled"] or not flags["withdrawals_enabled"]:
+        raise HTTPException(status_code=400, detail=f"{vault['name']}: withdrawals are temporarily disabled.")
 
     vault_type = vault.get("type", "morpho")
     if vault_type == "veda":
@@ -191,6 +195,9 @@ async def withdraw_build(req: WithdrawBuildRequest):
     if vault_type in ("veda", "ipor", "lido"):
         brand = {"veda": "Veda", "ipor": "IPOR", "lido": "Lido Earn"}[vault_type]
         raise HTTPException(status_code=400, detail=f"{brand} withdrawals must be done via protocol UI")
+    flags = await get_vault_flags(req.vault_id)
+    if not flags["enabled"] or not flags["withdrawals_enabled"]:
+        raise HTTPException(status_code=400, detail=f"{vault['name']}: withdrawals are temporarily disabled.")
 
     to_chain = vault["chain_id"]
     vault_addr = vault["address"]

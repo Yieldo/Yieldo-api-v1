@@ -4,6 +4,7 @@ from app.services.vault import get_all_vaults, get_vault, get_vault_response, au
 from app.services.rpc import get_vault_share_price
 from app.services import database
 from app.routes.partners import get_partner_from_api_key
+from app.routes.admin import get_disabled_vault_ids, is_vault_enabled
 
 router = APIRouter(prefix="/v1/vaults", tags=["vaults"])
 
@@ -25,6 +26,12 @@ async def list_vaults(
         enrolled = partner.get("enrolled_vaults", [])
         if enrolled:
             vaults = [v for v in vaults if v.vault_id in enrolled]
+    # Strip vaults the admin has disabled. The admin console keeps a
+    # `vault_admin_state` overlay; vaults without an entry default to enabled,
+    # so this is a no-op until an admin actually flips a toggle.
+    disabled = await get_disabled_vault_ids()
+    if disabled:
+        vaults = [v for v in vaults if v.vault_id not in disabled]
     return vaults
 
 
@@ -32,6 +39,10 @@ async def list_vaults(
 async def get_vault_detail(vault_id: str):
     v = get_vault(vault_id)
     if not v:
+        raise HTTPException(status_code=404, detail=f"Vault {vault_id} not found")
+    # If admin has disabled this vault, hide it from the public detail view
+    # too — same 404 so we don't reveal that disabled vaults exist.
+    if not await is_vault_enabled(vault_id):
         raise HTTPException(status_code=404, detail=f"Vault {vault_id} not found")
     try:
         total_assets, total_supply = get_vault_share_price(v["chain_id"], v["address"])

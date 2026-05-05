@@ -46,7 +46,12 @@ def load_vaults():
 
     for v in raw:
         chain_id = v["chain_id"]
-        if chain_id not in DEPOSIT_ROUTER_ADDRESSES:
+        # Vaults with external_router=true skip our DepositRouter and use LiFi
+        # composer to call vault.deposit() directly. Lets us list vaults on
+        # chains where we haven't deployed (yet) — e.g. Spark Savings xDAI on
+        # Gnosis (chain 100). Without this, the loader would silently filter
+        # them out and the Intel/explorer pages would show 'Vault not found'.
+        if chain_id not in DEPOSIT_ROUTER_ADDRESSES and not v.get("external_router"):
             continue
         vault_id = f"{chain_id}:{v['address'].lower()}"
         resolved = _resolve_asset(chain_id, v["asset"], v["address"])
@@ -95,7 +100,12 @@ def load_vaults():
             "redemption_asset_address": red_addr,
             "redemption_asset_decimals": red_dec,
             "accepted_assets": accepted,  # [{symbol, address, decimals}, ...]
-            "deposit_router": DEPOSIT_ROUTER_ADDRESSES[chain_id],
+            "deposit_router": DEPOSIT_ROUTER_ADDRESSES.get(chain_id, ""),
+            # external_router=true means this vault has no Yieldo DepositRouter
+            # on its chain — quote/build hits LiFi composer with vault.deposit()
+            # as the final call, bypassing our router entirely. Used for chains
+            # where we haven't deployed yet (e.g. Spark Savings xDAI on Gnosis).
+            "external_router": bool(v.get("external_router", False)),
             "type": v.get("type", "morpho"),
             "min_deposit": v.get("min_deposit"),
             "curator": v.get("curator"),
@@ -291,4 +301,5 @@ def _to_response(v: dict) -> VaultResponse:
         curator=v.get("curator"),
         paused=bool(v.get("paused", False)),
         paused_reason=v.get("paused_reason"),
+        external_router=bool(v.get("external_router", False)),
     )

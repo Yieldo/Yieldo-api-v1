@@ -89,5 +89,6 @@
   {"address": "0x75741A12B36D181f44F389E0c6B1E0210311e3Ff", "name": "Steakhouse EURCV", "chain_id": 1, "asset": "eurcv", "type": "morpho"},
   {"address": "0xbeef0C075Da5D01112AE5cF34d257074fB5DDB2f", "name": "Steakhouse Prime Instant EURCV", "chain_id": 1, "asset": "eurcv", "type": "morpho"},
   {"address": "0xBeEF086b8807Dc5E5A1740C5E3a7C4c366eA6ab5", "name": "Steakhouse EURC", "chain_id": 8453, "asset": "eurc", "type": "morpho"},
-  {"address": "0xbeef009F28cCf367444a9F79096862920e025DC1", "name": "Steakhouse Prime EURC", "chain_id": 8453, "asset": "eurc", "type": "morpho"}
+  {"address": "0xbeef009F28cCf367444a9F79096862920e025DC1", "name": "Steakhouse Prime EURC", "chain_id": 8453, "asset": "eurc", "type": "morpho"},
+  {"address": "0xaf204776c7245bf4147c2612bf6e5972ee483701", "name": "Spark Savings xDAI", "chain_id": 100, "asset": "wxdai", "type": "morpho", "external_router": true}
 ]

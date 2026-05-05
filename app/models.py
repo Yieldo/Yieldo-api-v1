@@ -39,6 +39,11 @@ class VaultResponse(BaseModel):
     # pauses their queue. UI greys out deposit + shows the reason.
     paused: bool = False
     paused_reason: Optional[str] = None
+    # True for vaults on chains where Yieldo has no DepositRouter — deposits
+    # route via LiFi composer + direct vault.deposit() instead. Used for
+    # cross-chain experiments before deploying our router on a new chain
+    # (e.g. Spark Savings xDAI on Gnosis).
+    external_router: bool = False
 
 
 class VaultDetailResponse(VaultResponse):

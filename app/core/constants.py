@@ -111,9 +111,14 @@ CHAIN_CONFIG: dict[int, dict] = {
         "key": "katana",
         "explorer": "https://katanascan.com",
     },
+    100: {
+        "name": "Gnosis",
+        "key": "gnosis",
+        "explorer": "https://gnosisscan.io",
+    },
 }
 
-SOURCE_CHAINS = [1, 8453, 42161, 10, 43114, 56, 143, 999, 747474]
+SOURCE_CHAINS = [1, 8453, 42161, 10, 43114, 56, 143, 999, 747474, 100]
 
 ASSET_TOKEN_CONFIG: dict[int, dict[str, tuple[str, int]]] = {
     1: {
@@ -162,6 +167,15 @@ ASSET_TOKEN_CONFIG: dict[int, dict[str, tuple[str, int]]] = {
         # is_direct=False and quote falls into LiFi → "No route found" on
         # same-chain same-token deposits.
         "usdc": ("0x754704Bc059F8C67012fEd69BC8A327a5aafb603", 6),
+    },
+    100: {
+        # Gnosis chain. wxdai is the wrapped form of native xDAI and is the
+        # asset Spark Savings xDAI (sDAI) accepts on deposit. usdc.e is the
+        # bridged-from-mainnet variant most commonly held on Gnosis.
+        "wxdai": ("0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d", 18),
+        "xdai":  ("0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d", 18),  # alias to wxdai
+        "usdc":  ("0x2a22f9c3b484c3629090FeED35F17Ff8F88f76F0", 6),    # USDC.e bridged
+        "usdt":  ("0x4ECaBa5870353805a9F068101A40E0f32ed605C6", 6),
     },
 }
 

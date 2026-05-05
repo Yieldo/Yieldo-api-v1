@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     monad_rpc_url: str = "https://rpc.monad.xyz"
     hyperliquid_rpc_url: str = "https://rpc.hyperliquid.xyz/evm"
     katana_rpc_url: str = "https://rpc.katanarpc.com"
+    gnosis_rpc_url: str = "https://rpc.gnosischain.com"
     mongodb_url: str = ""
     # The indexer (indexer-v1) writes to a different Mongo cluster — score
     # endpoints read from that cluster. If not set, falls back to mongodb_url.

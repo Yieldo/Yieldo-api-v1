@@ -341,6 +341,42 @@ async def build_transaction(req: BuildRequest, request: Request):
     direct_deadline = now_ts + 3600          # 1 hour
     composer_deadline = now_ts + 6 * 3600    # 6 hours
 
+    # External-router vaults (e.g. Spark Savings xDAI on Gnosis): no Yieldo
+    # DepositRouter on this chain — call vault.deposit() directly. Same-chain =
+    # user signs straight to the vault. Cross-chain falls through to the LiFi
+    # composer path below with vault as the contractCalls target.
+    external_router = bool(vault.get("external_router"))
+
+    if is_direct and external_router:
+        # Direct ERC-4626 deposit: vault.deposit(amount, receiver)
+        from web3 import Web3
+        from eth_abi import encode as abi_encode
+        selector = Web3.keccak(text="deposit(uint256,address)")[:4].hex()
+        encoded_args = abi_encode(["uint256", "address"], [from_amount_int, Web3.to_checksum_address(req.user_address)]).hex()
+        calldata = "0x" + selector + encoded_args
+        response = BuildResponse(
+            transaction_request=TransactionRequest(
+                to=Web3.to_checksum_address(deposit_target),
+                data=calldata,
+                value="0",
+                chain_id=to_chain,
+                gas_limit="350000",
+            ),
+            approval=ApprovalData(
+                token_address=to_token,
+                spender_address=Web3.to_checksum_address(deposit_target),
+                amount=req.from_amount,
+            ),
+            tracking=TrackingInfo(from_chain_id=to_chain, to_chain_id=to_chain),
+        )
+        tracking_id = await database.save_transaction(
+            req.model_dump(), response.model_dump(),
+            vault_name=vault["name"], referrer=req.referrer,
+            referrer_handle=req.referrer_handle, quote_type="direct-external",
+        )
+        response.tracking_id = tracking_id
+        return response
+
     if is_direct:
         calldata = encode_deposit_for_calldata(
             to_chain, deposit_target, to_token, from_amount_int,
@@ -413,15 +449,28 @@ async def build_transaction(req: BuildRequest, request: Request):
         #    sweeps it via the allowance/balance check.
         SWAP_HINT_BUFFER_BPS = 200  # 2.00%
         cc_amount = int(int(to_amount) * (10000 - SWAP_HINT_BUFFER_BPS) // 10000)
-        cc_calldata = encode_deposit_for_available_calldata(
-            to_chain, deposit_target, to_token,
-            req.user_address, partner_id, partner_type, is_erc4626,
-            min_amount=0, min_shares_out=0, deadline=composer_deadline,
-        )
+        if external_router:
+            # No DepositRouter on this chain — call vault.deposit() directly.
+            # LiFi will: bridge → swap to deposit asset → call this contract.
+            from web3 import Web3
+            from eth_abi import encode as abi_encode
+            sel = Web3.keccak(text="deposit(uint256,address)")[:4].hex()
+            cc_calldata = "0x" + sel + abi_encode(
+                ["uint256", "address"],
+                [cc_amount, Web3.to_checksum_address(req.user_address)],
+            ).hex()
+            cc_target = Web3.to_checksum_address(deposit_target)
+        else:
+            cc_calldata = encode_deposit_for_available_calldata(
+                to_chain, deposit_target, to_token,
+                req.user_address, partner_id, partner_type, is_erc4626,
+                min_amount=0, min_shares_out=0, deadline=composer_deadline,
+            )
+            cc_target = deposit_router
         cc_quote = await lifi.get_contract_calls_quote(
             req.from_chain_id, req.from_token, req.from_amount,
             to_chain, to_token, req.user_address,
-            deposit_router, cc_calldata, str(cc_amount),
+            cc_target, cc_calldata, str(cc_amount),
             preferred_bridges=[bridge] if bridge else None,
             slippage=req.slippage,
         )
@@ -451,11 +500,26 @@ async def build_transaction(req: BuildRequest, request: Request):
         # left in the user's own wallet (they keep it, no loss).
         TWO_STEP_BUFFER_BPS = 200
         dep_amount = int(int(to_amount) * (10000 - TWO_STEP_BUFFER_BPS) // 10000)
-        dep_calldata = encode_deposit_for_calldata(
-            to_chain, deposit_target, to_token, dep_amount,
-            req.user_address, partner_id, partner_type, is_erc4626,
-            min_shares_out=0, deadline=composer_deadline,
-        )
+
+        if external_router:
+            # Step 2 calls vault.deposit() directly on the destination chain.
+            from web3 import Web3
+            from eth_abi import encode as abi_encode
+            sel = Web3.keccak(text="deposit(uint256,address)")[:4].hex()
+            dep_calldata = "0x" + sel + abi_encode(
+                ["uint256", "address"],
+                [dep_amount, Web3.to_checksum_address(req.user_address)],
+            ).hex()
+            dep_target = Web3.to_checksum_address(deposit_target)
+            dep_gas = "350000"
+        else:
+            dep_calldata = encode_deposit_for_calldata(
+                to_chain, deposit_target, to_token, dep_amount,
+                req.user_address, partner_id, partner_type, is_erc4626,
+                min_shares_out=0, deadline=composer_deadline,
+            )
+            dep_target = deposit_router
+            dep_gas = deposit_gas_limit
 
         response = BuildResponse(
             transaction_request=TransactionRequest(
@@ -479,15 +543,15 @@ async def build_transaction(req: BuildRequest, request: Request):
             two_step=True,
             deposit_tx=DepositStep(
                 transaction_request=TransactionRequest(
-                    to=deposit_router,
+                    to=dep_target,
                     data=dep_calldata,
                     value="0",
                     chain_id=to_chain,
-                    gas_limit=deposit_gas_limit,
+                    gas_limit=dep_gas,
                 ),
                 approval=ApprovalData(
                     token_address=to_token,
-                    spender_address=deposit_router,
+                    spender_address=dep_target,
                     amount=str(dep_amount),
                 ),
             ),

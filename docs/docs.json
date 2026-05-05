@@ -91,5 +91,8 @@
       "website": "https://yieldo.xyz",
       "github": "https://github.com/Yieldo"
     }
-  }
+  },
+  "redirects": [
+    { "source": "/", "destination": "/introduction", "permanent": true }
+  ]
 }

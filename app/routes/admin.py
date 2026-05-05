@@ -389,19 +389,72 @@ async def get_disabled_vault_ids() -> set[str]:
     return out
 
 
+def _flatten_metrics(metrics: dict | None) -> dict:
+    """Indexer stores each metric as `{value, ...}` envelopes. Public-side
+    /api/vaults flattens them; we mirror the same shape so the admin page can
+    feed the data through the existing `mapVault` logic in useVaultData.js."""
+    out: dict = {}
+    if not isinstance(metrics, dict):
+        return out
+    for key, m in metrics.items():
+        if isinstance(m, dict) and "value" in m:
+            v = m["value"]
+            if isinstance(v, float) and v.is_integer():
+                v = int(v)
+            elif isinstance(v, float):
+                v = round(v, 4)
+            out[key] = v
+        else:
+            out[key] = m
+    return out
+
+
+async def _get_indexer_metrics_map() -> dict[str, dict]:
+    """Fetch ALL vault metric documents from the indexer DB in one query and
+    return as a {vault_id: row} map. Mirrors the shape produced by
+    /api/vaults.js (Vercel) so the FE can reuse mapVault() unchanged."""
+    db = database.get_indexer_db()
+    if db is None:
+        return {}
+    out: dict[str, dict] = {}
+    async for entry in db["vaults"].find({}):
+        vid = entry.get("_id") or entry.get("vault_id")
+        if not vid:
+            continue
+        row = {
+            "vault_id": vid,
+            "vault_address": entry.get("address") or vid,
+            "chain_id": entry.get("chain_id") or 1,
+            "asset": entry.get("asset") or "usdc",
+            "vault_name": entry.get("name") or (str(vid)[:12] + "..."),
+            "source": entry.get("source"),
+            "timestamp": entry["updated_at"].isoformat() if isinstance(entry.get("updated_at"), datetime) else None,
+        }
+        row.update(_flatten_metrics(entry.get("metrics")))
+        out[vid] = row
+    return out
+
+
 @router.get("/vaults")
 async def admin_list_vaults(_sess: dict = Depends(require_admin)):
     """Admin-only vault list. Returns EVERY vault from the registry (including
-    disabled ones) with the admin state inlined. New vaults indexed by the
-    indexer appear here automatically because the registry is the source of
-    truth — admin state is just an overlay."""
+    disabled ones) with the admin state inlined PLUS the same metric payload
+    /api/vaults serves on the public side — so the admin page can render APY,
+    score, TVL, etc. for vaults that aren't yet shown to users.
+
+    New vaults indexed by the indexer appear here automatically because the
+    registry is the source of truth — admin state is just an overlay."""
     raw = get_all_vaults_raw()
     state_map = await _get_state_map()
+    metrics_map = await _get_indexer_metrics_map()
     out = []
     for v in raw:
         vid = v.get("vault_id")
         st = state_map.get(vid) or _default_state(vid)
         eff = _effective_for(v, st)
+        # Same payload shape /api/vaults.js produces — lets the FE feed this
+        # through the existing mapVault() to compute scores/APY/risk/etc.
+        metrics = metrics_map.get(vid, {})
         out.append({
             "vault_id": vid,
             "name": v.get("name"),
@@ -441,8 +494,90 @@ async def admin_list_vaults(_sess: dict = Depends(require_admin)):
 
             "updated_at": st.get("updated_at").isoformat() if isinstance(st.get("updated_at"), datetime) else None,
             "updated_by": st.get("updated_by"),
+
+            # Inline metrics — same key shape as /api/vaults.js. Includes:
+            # P01, P03, P05, P06, P07, P08, P10, P12, T01, T02, T03,
+            # C01, C01_USD, C03, C07, D01, R02, R05, source, etc.
+            "metrics": metrics,
         })
     return {"vaults": out, "count": len(out)}
+
+
+@router.get("/vaults/{vault_id}")
+async def admin_vault_detail(vault_id: str, _sess: dict = Depends(require_admin)):
+    """Full vault detail bypassing the public-side disable filter. Mirrors
+    /api/vaults/[vaultId].js so the admin can review metrics — including
+    snapshots for the APY chart — before flipping a vault live."""
+    raw = get_all_vaults_raw()
+    vault = next((v for v in raw if v.get("vault_id") == vault_id), None)
+    if not vault:
+        raise HTTPException(404, "Unknown vault_id")
+
+    state = (await _get_state_map()).get(vault_id) or _default_state(vault_id)
+    eff = _effective_for(vault, state)
+
+    db = database.get_indexer_db()
+    metrics_row: dict = {}
+    snapshots: list = []
+    if db is not None:
+        entry = await db["vaults"].find_one({"_id": vault_id})
+        if entry:
+            metrics_row = {
+                "vault_id": vault_id,
+                "vault_address": entry.get("address") or vault_id,
+                "chain_id": entry.get("chain_id") or 1,
+                "asset": entry.get("asset") or "usdc",
+                "vault_name": entry.get("name") or (vault_id[:12] + "..."),
+                "source": entry.get("source"),
+                "timestamp": entry["updated_at"].isoformat() if isinstance(entry.get("updated_at"), datetime) else None,
+            }
+            metrics_row.update(_flatten_metrics(entry.get("metrics")))
+        # Same snapshot query as /api/vaults/[vaultId].js (case-insensitive id match).
+        snap_cursor = db["snapshots"].find({"vault_id": vault_id}).sort("date", 1)
+        async for s in snap_cursor:
+            snapshots.append({
+                "date": s.get("date"),
+                "net_apy": s.get("net_apy"),
+                "nav": s.get("nav"),
+                "total_assets_usd": s.get("total_assets_usd"),
+                "total_assets_native": s.get("total_assets_native"),
+            })
+
+    payload = {
+        # Registry block (same shape as get_vault detail)
+        "vault_id": vault_id,
+        "name": vault.get("name"),
+        "address": vault.get("address"),
+        "chain_id": vault.get("chain_id"),
+        "chain_name": vault.get("chain_name"),
+        "asset_symbol": vault.get("asset_symbol"),
+        "asset_address": vault.get("asset_address"),
+        "type": vault.get("type"),
+        "curator": vault.get("curator"),
+        "paused": bool(vault.get("paused", False)),
+        "paused_reason": vault.get("paused_reason"),
+        "external_router": bool(vault.get("external_router", False)),
+
+        # Admin state + effective flags + locks + reasons (same as list)
+        "admin_enabled":             bool(state.get("enabled", True)),
+        "admin_deposits_enabled":    bool(state.get("deposits_enabled", True)),
+        "admin_withdrawals_enabled": bool(state.get("withdrawals_enabled", True)),
+        "effective_listed":      eff["listed"],
+        "effective_deposits":    eff["deposits"],
+        "effective_withdrawals": eff["withdrawals"],
+        "listed_reasons":      eff["listed_reasons"],
+        "deposits_reasons":    eff["deposits_reasons"],
+        "withdrawals_reasons": eff["withdrawals_reasons"],
+        "deposits_locked":    eff["locks"]["deposits_locked"],
+        "withdrawals_locked": eff["locks"]["withdrawals_locked"],
+
+        # Inline indexer payload + snapshots — same shape as /api/vaults/[id]
+        # so the FE can render the existing VaultDetailPage chart/table view
+        # without any custom mapping.
+        "metrics": metrics_row,
+        "snapshots": snapshots,
+    }
+    return payload
 
 
 @router.patch("/vaults/{vault_id}")

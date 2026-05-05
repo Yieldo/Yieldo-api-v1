@@ -882,14 +882,64 @@ async def save_withdraw(*, user: str, vault_id: str, vault_name: str, shares: st
     after earning yield makes yield show as negative)."""
     if _db is None:
         return None
+    now = datetime.now(timezone.utc)
     doc = {
         "user": user.lower(), "vault_id": vault_id, "vault_name": vault_name,
         "shares": shares, "asset": asset.lower(), "mode": mode, "chain_id": chain_id,
         "assets_out": assets_out,
-        "status": "pending", "created_at": datetime.now(timezone.utc),
+        "status": "pending", "tx_hash": None,
+        "status_history": [{"status": "pending", "timestamp": now}],
+        "created_at": now, "updated_at": now,
     }
     result = await _db["withdrawals"].insert_one(doc)
     return str(result.inserted_id)
+
+
+async def set_withdrawal_tx_hash(tracking_oid, tx_hash: str) -> bool:
+    """Attach the broadcast tx_hash to a withdraw record, flipping pending→submitted
+    so the resolver picks it up. Mirrors set_transaction_tx_hash for deposits."""
+    if _db is None:
+        return False
+    now = datetime.now(timezone.utc)
+    res = await _db["withdrawals"].update_one(
+        {"_id": tracking_oid},
+        {
+            "$set": {"tx_hash": tx_hash, "status": "submitted", "updated_at": now},
+            "$push": {"status_history": {"status": "submitted", "timestamp": now, "tx_hash": tx_hash}},
+        },
+    )
+    return res.matched_count > 0
+
+
+async def set_withdrawal_status_if_pending(tracking_oid, new_status: str) -> bool:
+    """Force a withdraw record into a new status if still pending/submitted.
+    Used to mark wallet-rejected attempts abandoned right away."""
+    if _db is None:
+        return False
+    now = datetime.now(timezone.utc)
+    res = await _db["withdrawals"].update_one(
+        {"_id": tracking_oid, "status": {"$in": ["pending", "submitted"]}},
+        {
+            "$set": {"status": new_status, "updated_at": now},
+            "$push": {"status_history": {"status": new_status, "timestamp": now}},
+        },
+    )
+    return res.modified_count > 0
+
+
+async def get_user_withdrawals(address: str, limit: int = 50, skip: int = 0) -> list[dict]:
+    """All withdraws for a user, newest-first. Mirrors get_user_deposits."""
+    if _db is None:
+        return []
+    cursor = _db["withdrawals"].find(
+        {"user": address.lower()},
+    ).sort("created_at", -1).skip(skip).limit(limit)
+    docs = await cursor.to_list(limit)
+    for d in docs:
+        oid = d.pop("_id", None)
+        if oid is not None:
+            d["tracking_id"] = str(oid)
+    return docs
 
 
 async def mark_withdraw_request_submitted(tracking_id: str, *, req_hash: str, protocol_request_id: str, escrow: str, tx_hash: str):

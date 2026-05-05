@@ -10,7 +10,11 @@ Per-protocol dispatch:
  - midas (async)           → Midas RV redeemRequest(tokenOut, amt)
  - veda                    → reject (send user to Veda UI; AtomicQueue too complex to proxy)
 """
-from fastapi import APIRouter, HTTPException
+from datetime import datetime
+
+from bson import ObjectId
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 from web3 import Web3
 
 from app.models import (
@@ -18,11 +22,16 @@ from app.models import (
     WithdrawBuildRequest, WithdrawBuildResponse,
     TransactionRequest, ApprovalData,
 )
+from app.core.constants import CHAIN_CONFIG
 from app.services.rpc import get_vault_convert_to_assets, get_w3
 from app.services.vault import get_vault, get_vault_response
 from app.services import database
 
 router = APIRouter(prefix="/v1/withdraw", tags=["withdraw"])
+
+
+class WithdrawTxReport(BaseModel):
+    tx_hash: str
 
 # Midas RedemptionVault addresses — keyed by share (mToken) address.
 # Found via scripts/verify-midas-rvs.js, all on Ethereum mainnet.
@@ -240,3 +249,55 @@ async def get_pending_requests(user_address: str):
     means fulfillment tokens land in the user's own wallet — no claim step.
     We just track `status` for dashboard UX."""
     return await database.get_user_withdraw_requests(user_address)
+
+
+@router.patch("/{tracking_id}/tx")
+async def report_withdraw_tx(tracking_id: str, body: WithdrawTxReport):
+    """Report the broadcast tx hash for a built withdraw. Mirrors deposits/{id}/tx."""
+    if not body.tx_hash:
+        raise HTTPException(status_code=400, detail="tx_hash required")
+    try:
+        oid = ObjectId(tracking_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid tracking_id")
+    res = await database.set_withdrawal_tx_hash(oid, body.tx_hash)
+    if not res:
+        raise HTTPException(status_code=404, detail="Tracking record not found")
+    return {"ok": True, "tracking_id": tracking_id, "tx_hash": body.tx_hash}
+
+
+@router.patch("/{tracking_id}/abandon")
+async def abandon_withdraw(tracking_id: str):
+    """Mark a built-but-never-broadcast withdraw as abandoned (wallet rejected
+    or never signed). Without this it sits in `pending` until the abandon timeout."""
+    try:
+        oid = ObjectId(tracking_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid tracking_id")
+    res = await database.set_withdrawal_status_if_pending(oid, "abandoned")
+    return {"ok": True, "updated": res, "tracking_id": tracking_id}
+
+
+@router.get("/list")
+async def list_user_withdrawals(
+    user_address: str = Query(..., description="User wallet address"),
+    limit: int = Query(50, le=200),
+    skip: int = Query(0, ge=0),
+):
+    """All withdraws for a user, newest-first. Mirrors /v1/deposits."""
+    docs = await database.get_user_withdrawals(user_address, limit=limit, skip=skip)
+    for d in docs:
+        for k in ("created_at", "updated_at", "submitted_at", "claimed_at"):
+            v = d.get(k)
+            if isinstance(v, datetime):
+                d[k] = v.isoformat()
+        for sh in d.get("status_history", []):
+            ts = sh.get("timestamp")
+            if isinstance(ts, datetime):
+                sh["timestamp"] = ts.isoformat()
+        chain_id = d.get("chain_id")
+        cfg = CHAIN_CONFIG.get(chain_id, {})
+        tx_hash = d.get("tx_hash")
+        d["explorer_link"] = f"{cfg['explorer']}/tx/{tx_hash}" if cfg.get("explorer") and tx_hash else None
+        d["chain_name"] = cfg.get("name", "")
+    return docs

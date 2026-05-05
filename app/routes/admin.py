@@ -435,26 +435,66 @@ async def _get_indexer_metrics_map() -> dict[str, dict]:
     return out
 
 
+def _synthesize_registry_from_metrics(vault_id: str, metrics: dict) -> dict:
+    """Build a faux registry entry for a vault that lives in the indexer DB
+    but isn't (yet) in vaults.json. The admin page can still display it and
+    control visibility — but deposits/withdrawals stay locked because we
+    don't have a deposit_router or supported `type` for it."""
+    return {
+        "vault_id": vault_id,
+        "name": metrics.get("vault_name") or vault_id,
+        "address": metrics.get("vault_address") or vault_id,
+        "chain_id": metrics.get("chain_id"),
+        "chain_name": None,  # we don't track chain names in the indexer doc; FE falls back to CHAIN_NAMES[id]
+        "asset_symbol": (metrics.get("asset") or "").upper() or None,
+        "asset_address": None,
+        "type": "unsupported",  # forces both deposit & withdraw to hard-lock
+        "curator": metrics.get("source"),
+        "paused": False,
+        "paused_reason": None,
+        "external_router": False,
+    }
+
+
 @router.get("/vaults")
 async def admin_list_vaults(_sess: dict = Depends(require_admin)):
-    """Admin-only vault list. Returns EVERY vault from the registry (including
-    disabled ones) with the admin state inlined PLUS the same metric payload
-    /api/vaults serves on the public side — so the admin page can render APY,
-    score, TVL, etc. for vaults that aren't yet shown to users.
+    """Admin-only vault list. Source of truth is the UNION of:
+      - vaults.json (registry — has deposit_router + type + paused + curator)
+      - yieldo_v1.vaults (indexer — has metrics + score components)
 
-    New vaults indexed by the indexer appear here automatically because the
-    registry is the source of truth — admin state is just an overlay."""
+    Vaults present in the indexer but not the registry are surfaced too, so
+    the admin sees every vault the indexer is tracking and can control its
+    public visibility. Their deposit/withdraw toggles are hard-locked
+    (`registry_missing: true`) until someone adds a real entry to vaults.json.
+    """
     raw = get_all_vaults_raw()
     state_map = await _get_state_map()
     metrics_map = await _get_indexer_metrics_map()
+
+    # Build the union: every vault from either source. Registry takes
+    # precedence for the merge target so vaults that exist in both retain
+    # their full registry metadata.
+    registry_by_id = {v.get("vault_id"): v for v in raw if v.get("vault_id")}
+    all_ids = set(registry_by_id.keys()) | set(metrics_map.keys())
+
     out = []
-    for v in raw:
-        vid = v.get("vault_id")
+    for vid in all_ids:
+        in_registry = vid in registry_by_id
+        v = registry_by_id.get(vid) or _synthesize_registry_from_metrics(vid, metrics_map.get(vid, {}))
         st = state_map.get(vid) or _default_state(vid)
         eff = _effective_for(v, st)
-        # Same payload shape /api/vaults.js produces — lets the FE feed this
-        # through the existing mapVault() to compute scores/APY/risk/etc.
         metrics = metrics_map.get(vid, {})
+
+        # When a vault is registry-missing we surface a clearer reason on the
+        # locked toggles: "needs registry entry" instead of "type-locked".
+        deposits_reasons = list(eff["deposits_reasons"])
+        withdrawals_reasons = list(eff["withdrawals_reasons"])
+        if not in_registry:
+            if "type-locked" in deposits_reasons:
+                deposits_reasons[deposits_reasons.index("type-locked")] = "registry-missing"
+            if "type-locked" in withdrawals_reasons:
+                withdrawals_reasons[withdrawals_reasons.index("type-locked")] = "registry-missing"
+
         out.append({
             "vault_id": vid,
             "name": v.get("name"),
@@ -469,6 +509,10 @@ async def admin_list_vaults(_sess: dict = Depends(require_admin)):
             "paused_reason": v.get("paused_reason"),
             "external_router": bool(v.get("external_router", False)),
 
+            # NEW: tells the FE this vault came from the indexer only.
+            "registry_missing": not in_registry,
+            "registry_present": in_registry,
+
             # Admin override (mutable, what the toggles control)
             "admin_enabled":             bool(st.get("enabled", True)),
             "admin_deposits_enabled":    bool(st.get("deposits_enabled", True)),
@@ -481,8 +525,8 @@ async def admin_list_vaults(_sess: dict = Depends(require_admin)):
 
             # Why is each effective flag the way it is — for badges/tooltips
             "listed_reasons":      eff["listed_reasons"],
-            "deposits_reasons":    eff["deposits_reasons"],
-            "withdrawals_reasons": eff["withdrawals_reasons"],
+            "deposits_reasons":    deposits_reasons,
+            "withdrawals_reasons": withdrawals_reasons,
             # Hard locks from registry — toggles for these are non-overridable
             "deposits_locked":    eff["locks"]["deposits_locked"],
             "withdrawals_locked": eff["locks"]["withdrawals_locked"],
@@ -500,6 +544,12 @@ async def admin_list_vaults(_sess: dict = Depends(require_admin)):
             # C01, C01_USD, C03, C07, D01, R02, R05, source, etc.
             "metrics": metrics,
         })
+    # Stable ordering: registry-present first, then by chain, then by name.
+    out.sort(key=lambda r: (
+        not r["registry_present"],
+        r.get("chain_id") or 0,
+        (r.get("name") or "").lower(),
+    ))
     return {"vaults": out, "count": len(out)}
 
 
@@ -507,14 +557,15 @@ async def admin_list_vaults(_sess: dict = Depends(require_admin)):
 async def admin_vault_detail(vault_id: str, _sess: dict = Depends(require_admin)):
     """Full vault detail bypassing the public-side disable filter. Mirrors
     /api/vaults/[vaultId].js so the admin can review metrics — including
-    snapshots for the APY chart — before flipping a vault live."""
+    snapshots for the APY chart — before flipping a vault live.
+
+    Accepts vaults that exist in the indexer but not the registry (newly
+    indexed vaults that haven't been added to vaults.json yet). For those,
+    the registry block is synthesized so the FE can render scores while
+    deposits/withdrawals stay hard-locked."""
     raw = get_all_vaults_raw()
     vault = next((v for v in raw if v.get("vault_id") == vault_id), None)
-    if not vault:
-        raise HTTPException(404, "Unknown vault_id")
-
-    state = (await _get_state_map()).get(vault_id) or _default_state(vault_id)
-    eff = _effective_for(vault, state)
+    in_registry = vault is not None
 
     db = database.get_indexer_db()
     metrics_row: dict = {}
@@ -532,6 +583,16 @@ async def admin_vault_detail(vault_id: str, _sess: dict = Depends(require_admin)
                 "timestamp": entry["updated_at"].isoformat() if isinstance(entry.get("updated_at"), datetime) else None,
             }
             metrics_row.update(_flatten_metrics(entry.get("metrics")))
+
+    # If neither the registry nor the indexer has this vault, it doesn't exist.
+    if not in_registry and not metrics_row:
+        raise HTTPException(404, "Unknown vault_id")
+    if not in_registry:
+        vault = _synthesize_registry_from_metrics(vault_id, metrics_row)
+
+    state = (await _get_state_map()).get(vault_id) or _default_state(vault_id)
+    eff = _effective_for(vault, state)
+    if db is not None:
         # Same snapshot query as /api/vaults/[vaultId].js (case-insensitive id match).
         snap_cursor = db["snapshots"].find({"vault_id": vault_id}).sort("date", 1)
         async for s in snap_cursor:
@@ -557,6 +618,8 @@ async def admin_vault_detail(vault_id: str, _sess: dict = Depends(require_admin)
         "paused": bool(vault.get("paused", False)),
         "paused_reason": vault.get("paused_reason"),
         "external_router": bool(vault.get("external_router", False)),
+        "registry_missing": not in_registry,
+        "registry_present": in_registry,
 
         # Admin state + effective flags + locks + reasons (same as list)
         "admin_enabled":             bool(state.get("enabled", True)),

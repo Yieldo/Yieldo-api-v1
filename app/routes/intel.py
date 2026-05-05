@@ -114,15 +114,41 @@ def _humanize_time_ago(ts: datetime, now: datetime | None = None) -> str:
     return ts.strftime("%d %b %Y")
 
 
+def _normalize_evolution(items: list[dict]) -> list[dict]:
+    """Pass through the indexer's `evolution` log into a stable JSON shape
+    the FE can render (timeline of how the alert has changed over time)."""
+    out = []
+    for e in items or []:
+        if not isinstance(e, dict):
+            continue
+        out.append({
+            "ts":            _iso(e.get("ts")),
+            "metrics":       _normalize_metrics(e.get("metrics") or []),
+            "scoreDisplay":  e.get("score_display"),
+            "deltaDisplay":  e.get("delta_display"),
+            "summary":       e.get("summary"),
+        })
+    return out
+
+
 def _to_high_signal(doc: dict, now: datetime) -> dict:
     """Format a HIGH-tier signal to match the JSX HighSignalCard shape."""
+    evolution = _normalize_evolution(doc.get("evolution") or [])
     return {
         "id":              doc.get("rule_id"),
         "signalId":        doc.get("_id"),
+        "incidentId":      doc.get("incident_id"),
         "label":           doc.get("label") or doc.get("rule_name"),
         "tag":             doc.get("tag"),
-        "timeAgo":         _humanize_time_ago(doc.get("ts"), now),
-        "ts":              _iso(doc.get("ts")),
+        # `timeAgo` shows when this incident was last updated (most useful for
+        # ongoing incidents). `firstSeenAgo` shows when it started.
+        "timeAgo":         _humanize_time_ago(doc.get("last_seen") or doc.get("ts"), now),
+        "firstSeenAgo":    _humanize_time_ago(doc.get("first_seen") or doc.get("ts"), now),
+        "ts":              _iso(doc.get("last_seen") or doc.get("ts")),
+        "firstSeen":       _iso(doc.get("first_seen")),
+        "lastSeen":        _iso(doc.get("last_seen")),
+        "updateCount":     max(0, len(evolution) - 1),
+        "evolution":       evolution,
         "vaultId":         doc.get("vault_id"),
         "vaultName":       doc.get("vault_name"),
         "chainId":         doc.get("chain_id"),
@@ -142,14 +168,19 @@ def _to_high_signal(doc: dict, now: datetime) -> dict:
 
 def _to_notable_signal(doc: dict, now: datetime) -> dict:
     """Format a MEDIUM-tier signal to match the JSX NotableSignalRow shape."""
+    evolution = _normalize_evolution(doc.get("evolution") or [])
     return {
         "id":         doc.get("rule_id"),
         "signalId":   doc.get("_id"),
+        "incidentId": doc.get("incident_id"),
         "tag":        doc.get("tag") or doc.get("rule_id"),
         "title":      doc.get("headline"),
         "desc":       doc.get("summary") or "",
-        "timeAgo":    _humanize_time_ago(doc.get("ts"), now),
-        "ts":         _iso(doc.get("ts")),
+        "timeAgo":    _humanize_time_ago(doc.get("last_seen") or doc.get("ts"), now),
+        "ts":         _iso(doc.get("last_seen") or doc.get("ts")),
+        "firstSeen":  _iso(doc.get("first_seen")),
+        "updateCount": max(0, len(evolution) - 1),
+        "evolution":  evolution,
         "vaultId":    doc.get("vault_id"),
         "vaultName":  doc.get("vault_name"),
         "chainName":  doc.get("chain_name"),
@@ -219,6 +250,36 @@ def _dimension_filter_query(dimension: Optional[str]) -> dict:
 # Endpoints
 # --------------------------------------------------------------------------
 
+def _time_window_query(cutoff: datetime) -> dict:
+    """Match signals whose latest activity (last_seen) falls within the window.
+    Falls back to `ts` for pre-coalescing docs that lack last_seen. This is
+    what makes incidents that are still being refreshed stay visible across
+    day boundaries: their last_seen keeps moving even though ts is fixed."""
+    return {"$or": [
+        {"last_seen": {"$gte": cutoff}},
+        {"last_seen": {"$exists": False}, "ts": {"$gte": cutoff}},
+    ]}
+
+
+def _dedup_pipeline(match: dict, sort: list[tuple[str, int]], skip: int, limit: int) -> list[dict]:
+    """Aggregation that collapses docs to one per incident_id (taking the most
+    recent). Safety net for any pre-existing duplicate docs from before the
+    incident-coalescing write logic landed; new writes already coalesce."""
+    return [
+        {"$match": match},
+        {"$addFields": {"_sort_ts": {"$ifNull": ["$last_seen", "$ts"]}}},
+        {"$sort": {"_sort_ts": -1}},
+        {"$group": {
+            "_id": {"$ifNull": ["$incident_id", "$_id"]},
+            "doc": {"$first": "$$ROOT"},
+        }},
+        {"$replaceRoot": {"newRoot": "$doc"}},
+        {"$sort": {"_sort_ts": -1}},
+        {"$skip": skip},
+        {"$limit": limit},
+    ]
+
+
 @router.get("/high")
 async def list_high(
     since: str = Query("24h", description="Time window: '24h', '7d', '30d'"),
@@ -229,9 +290,10 @@ async def list_high(
     db = _require_indexer_db()
     now = datetime.now(timezone.utc)
     cutoff = (now - _parse_since(since)).replace(tzinfo=None)
-    q: dict[str, Any] = {"tier": "HIGH", "ts": {"$gte": cutoff}}
+    q: dict[str, Any] = {"tier": "HIGH"}
+    q.update(_time_window_query(cutoff))
     q.update(_dimension_filter_query(dimension))
-    docs = await db.signals.find(q).sort("ts", -1).limit(limit).to_list(length=limit)
+    docs = await db.signals.aggregate(_dedup_pipeline(q, [("last_seen", -1)], 0, limit)).to_list(length=limit)
     return {
         "signals": [_to_high_signal(d, now) for d in docs],
         "count": len(docs),
@@ -251,11 +313,18 @@ async def list_notable(
     db = _require_indexer_db()
     now = datetime.now(timezone.utc)
     cutoff = (now - _parse_since(since)).replace(tzinfo=None)
-    q: dict[str, Any] = {"tier": "MEDIUM", "ts": {"$gte": cutoff}}
+    q: dict[str, Any] = {"tier": "MEDIUM"}
+    q.update(_time_window_query(cutoff))
     q.update(_dimension_filter_query(dimension))
-    cursor = db.signals.find(q).sort("ts", -1).skip(offset).limit(limit)
-    docs = await cursor.to_list(length=limit)
-    total = await db.signals.count_documents(q)
+    docs = await db.signals.aggregate(_dedup_pipeline(q, [("last_seen", -1)], offset, limit)).to_list(length=limit)
+    # Total is the count of distinct incidents matching the filter (after dedup).
+    count_pipeline = [
+        {"$match": q},
+        {"$group": {"_id": {"$ifNull": ["$incident_id", "$_id"]}}},
+        {"$count": "n"},
+    ]
+    total_res = await db.signals.aggregate(count_pipeline).to_list(length=1)
+    total = (total_res[0]["n"] if total_res else 0)
     return {
         "signals": [_to_notable_signal(d, now) for d in docs],
         "count":   len(docs),
@@ -274,13 +343,16 @@ async def list_activity(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    """LOW-tier signals — 'All activity' firehose."""
+    """LOW-tier signals — 'All activity' firehose. Activity rows are NOT
+    deduplicated by incident — each event is its own row by design (this is
+    the firehose, not the alert list)."""
     db = _require_indexer_db()
     now = datetime.now(timezone.utc)
     cutoff = (now - _parse_since(since)).replace(tzinfo=None)
-    q: dict[str, Any] = {"tier": "LOW", "ts": {"$gte": cutoff}}
+    q: dict[str, Any] = {"tier": "LOW"}
+    q.update(_time_window_query(cutoff))
     q.update(_dimension_filter_query(dimension))
-    cursor = db.signals.find(q).sort("ts", -1).skip(offset).limit(limit)
+    cursor = db.signals.find(q).sort([("last_seen", -1), ("ts", -1)]).skip(offset).limit(limit)
     docs = await cursor.to_list(length=limit)
     total = await db.signals.count_documents(q)
     return {
@@ -307,18 +379,27 @@ async def list_feed(
     db = _require_indexer_db()
     now = datetime.now(timezone.utc)
     cutoff = (now - _parse_since(since)).replace(tzinfo=None)
-    base = {"ts": {"$gte": cutoff}}
+    base: dict = {}
+    base.update(_time_window_query(cutoff))
     base.update(_dimension_filter_query(dimension))
 
     high_q     = {**base, "tier": "HIGH"}
     notable_q  = {**base, "tier": "MEDIUM"}
     activity_q = {**base, "tier": "LOW"}
 
-    high_docs    = await db.signals.find(high_q).sort("ts", -1).limit(high_limit).to_list(length=high_limit)
-    notable_docs = await db.signals.find(notable_q).sort("ts", -1).limit(notable_limit).to_list(length=notable_limit)
-    activity_docs = await db.signals.find(activity_q).sort("ts", -1).limit(activity_limit).to_list(length=activity_limit)
+    # HIGH and MEDIUM use the dedup pipeline so re-fired incidents collapse to
+    # one card. LOW (firehose) keeps every event.
+    high_docs    = await db.signals.aggregate(_dedup_pipeline(high_q, [], 0, high_limit)).to_list(length=high_limit)
+    notable_docs = await db.signals.aggregate(_dedup_pipeline(notable_q, [], 0, notable_limit)).to_list(length=notable_limit)
+    activity_docs = await db.signals.find(activity_q).sort([("last_seen", -1), ("ts", -1)]).limit(activity_limit).to_list(length=activity_limit)
     activity_total = await db.signals.count_documents(activity_q)
-    notable_total  = await db.signals.count_documents(notable_q)
+    notable_count_pipe = [
+        {"$match": notable_q},
+        {"$group": {"_id": {"$ifNull": ["$incident_id", "$_id"]}}},
+        {"$count": "n"},
+    ]
+    notable_total_res = await db.signals.aggregate(notable_count_pipe).to_list(length=1)
+    notable_total = (notable_total_res[0]["n"] if notable_total_res else 0)
 
     # Engine pulse: vault count & last cycle time, for the live header indicator
     vaults_count = await db.vaults.count_documents({})

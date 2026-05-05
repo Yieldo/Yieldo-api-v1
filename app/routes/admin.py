@@ -249,6 +249,88 @@ def _default_state(vault_id: str) -> dict:
     }
 
 
+# Vault types that are technically incompatible with parts of our flow,
+# regardless of admin policy. These are HARD locks — the admin can't override
+# them because the underlying contract integration doesn't support the action.
+# Unifying with the registry like this means the admin page reflects what
+# users actually experience, no duplicate "is it on?" sources.
+_DEPOSITS_HARD_LOCK_TYPES = {"unsupported"}
+_WITHDRAWALS_HARD_LOCK_TYPES = {"unsupported", "veda", "ipor", "lido"}
+
+
+def _registry_locks(vault: dict) -> dict:
+    """Read locks coming from vaults.json — these are 'why is the public UI
+    disabling this' annotations the admin sees alongside their own toggles."""
+    vtype = (vault.get("type") or "morpho").lower()
+    paused = bool(vault.get("paused", False))
+    return {
+        # Listing isn't blocked by registry alone — pause/unsupported only
+        # blocks deposit/withdraw flows. Admin still controls visibility.
+        "listed_locked":      False,
+        "deposits_locked":    vtype in _DEPOSITS_HARD_LOCK_TYPES,
+        "withdrawals_locked": vtype in _WITHDRAWALS_HARD_LOCK_TYPES,
+        # Soft signals — still reflected in the effective state.
+        "registry_paused":    paused,
+        "registry_type":      vtype,
+        "paused_reason":      vault.get("paused_reason"),
+    }
+
+
+def _effective_for(vault: dict, admin_state: dict) -> dict:
+    """Combine admin override + registry config into the single 'live' state.
+    This is what users experience and what the admin page shows on its toggles.
+
+    Rules:
+      Listed       = admin.enabled (admin fully controls visibility)
+      Deposits     = Listed AND admin.deposits_enabled AND not registry-paused AND not type-locked
+      Withdrawals  = Listed AND admin.withdrawals_enabled AND not type-locked
+
+    Soft signals (registry pause) are reflected in the effective state but
+    their reason is exposed so the admin sees WHY a vault is off, not just
+    that it's off."""
+    locks = _registry_locks(vault)
+    a_listed = bool(admin_state.get("enabled", True))
+    a_dep    = bool(admin_state.get("deposits_enabled", True))
+    a_wd     = bool(admin_state.get("withdrawals_enabled", True))
+
+    eff_listed = a_listed
+    eff_dep = (
+        eff_listed
+        and a_dep
+        and not locks["registry_paused"]
+        and not locks["deposits_locked"]
+    )
+    eff_wd = (
+        eff_listed
+        and a_wd
+        and not locks["withdrawals_locked"]
+    )
+
+    # Reason codes — surfaced as small badges in the admin UI.
+    listed_reasons    = [] if eff_listed else (["admin"] if not a_listed else [])
+    deposits_reasons  = []
+    withdrawals_reasons = []
+    if not eff_dep:
+        if not eff_listed:                deposits_reasons.append("listing-off")
+        if not a_dep and eff_listed:      deposits_reasons.append("admin")
+        if locks["deposits_locked"]:      deposits_reasons.append("type-locked")
+        if locks["registry_paused"]:      deposits_reasons.append("registry-paused")
+    if not eff_wd:
+        if not eff_listed:                withdrawals_reasons.append("listing-off")
+        if not a_wd and eff_listed:       withdrawals_reasons.append("admin")
+        if locks["withdrawals_locked"]:   withdrawals_reasons.append("type-locked")
+
+    return {
+        "listed":      eff_listed,
+        "deposits":    eff_dep,
+        "withdrawals": eff_wd,
+        "listed_reasons":      listed_reasons,
+        "deposits_reasons":    deposits_reasons,
+        "withdrawals_reasons": withdrawals_reasons,
+        "locks":               locks,
+    }
+
+
 async def _get_state_map() -> dict[str, dict]:
     """Return {vault_id: state_doc} for all vaults that have an admin entry.
     Vaults missing from this map default to fully enabled."""
@@ -278,7 +360,10 @@ async def is_vault_enabled(vault_id: str) -> bool:
 
 async def get_vault_flags(vault_id: str) -> dict:
     """Returns {enabled, deposits_enabled, withdrawals_enabled} for a vault.
-    Defaults to all-true when no admin entry exists."""
+    Defaults to all-true when no admin entry exists. NOTE: returns ADMIN
+    OVERRIDE only — does not include registry-side locks. Public endpoints
+    should also keep their existing registry checks (paused/type=unsupported);
+    this function only adds the admin-policy layer on top."""
     db = database._db  # noqa: SLF001
     if db is None:
         return {"enabled": True, "deposits_enabled": True, "withdrawals_enabled": True}
@@ -316,6 +401,7 @@ async def admin_list_vaults(_sess: dict = Depends(require_admin)):
     for v in raw:
         vid = v.get("vault_id")
         st = state_map.get(vid) or _default_state(vid)
+        eff = _effective_for(v, st)
         out.append({
             "vault_id": vid,
             "name": v.get("name"),
@@ -327,10 +413,32 @@ async def admin_list_vaults(_sess: dict = Depends(require_admin)):
             "type": v.get("type"),
             "curator": v.get("curator"),
             "paused": bool(v.get("paused", False)),
+            "paused_reason": v.get("paused_reason"),
             "external_router": bool(v.get("external_router", False)),
-            "enabled": bool(st.get("enabled", True)),
-            "deposits_enabled": bool(st.get("deposits_enabled", True)),
+
+            # Admin override (mutable, what the toggles control)
+            "admin_enabled":             bool(st.get("enabled", True)),
+            "admin_deposits_enabled":    bool(st.get("deposits_enabled", True)),
+            "admin_withdrawals_enabled": bool(st.get("withdrawals_enabled", True)),
+
+            # Effective live state (what users actually see — UI shows these)
+            "effective_listed":      eff["listed"],
+            "effective_deposits":    eff["deposits"],
+            "effective_withdrawals": eff["withdrawals"],
+
+            # Why is each effective flag the way it is — for badges/tooltips
+            "listed_reasons":      eff["listed_reasons"],
+            "deposits_reasons":    eff["deposits_reasons"],
+            "withdrawals_reasons": eff["withdrawals_reasons"],
+            # Hard locks from registry — toggles for these are non-overridable
+            "deposits_locked":    eff["locks"]["deposits_locked"],
+            "withdrawals_locked": eff["locks"]["withdrawals_locked"],
+
+            # Back-compat aliases for older FE code
+            "enabled":             bool(st.get("enabled", True)),
+            "deposits_enabled":    bool(st.get("deposits_enabled", True)),
             "withdrawals_enabled": bool(st.get("withdrawals_enabled", True)),
+
             "updated_at": st.get("updated_at").isoformat() if isinstance(st.get("updated_at"), datetime) else None,
             "updated_by": st.get("updated_by"),
         })
@@ -350,14 +458,24 @@ async def admin_toggle_vault(
         raise HTTPException(503, "DB not connected")
     # Vault must exist in the registry — guards against typos creating ghost rows.
     raw = get_all_vaults_raw()
-    if not any(v.get("vault_id") == vault_id for v in raw):
+    vault = next((v for v in raw if v.get("vault_id") == vault_id), None)
+    if not vault:
         raise HTTPException(404, "Unknown vault_id")
+    locks = _registry_locks(vault)
     update: dict = {}
     if req.enabled is not None:
         update["enabled"] = bool(req.enabled)
     if req.deposits_enabled is not None:
+        # Refuse to flip ON for vault types that physically can't accept
+        # deposits through our router. Storing True would still leave the
+        # public flow blocked by the registry check, but better to surface
+        # the conflict here than let the admin think they enabled something.
+        if req.deposits_enabled and locks["deposits_locked"]:
+            raise HTTPException(400, f"Deposits are locked by vault type ({locks['registry_type']}); cannot be enabled.")
         update["deposits_enabled"] = bool(req.deposits_enabled)
     if req.withdrawals_enabled is not None:
+        if req.withdrawals_enabled and locks["withdrawals_locked"]:
+            raise HTTPException(400, f"Withdrawals are locked by vault type ({locks['registry_type']}); cannot be enabled.")
         update["withdrawals_enabled"] = bool(req.withdrawals_enabled)
     if not update:
         raise HTTPException(400, "No fields to update")

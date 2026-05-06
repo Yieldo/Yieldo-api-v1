@@ -69,7 +69,11 @@ class StepDetail(BaseModel):
     to_token: Optional[str] = None
     from_amount: Optional[str] = None
     to_amount: Optional[str] = None
-    estimated_time: Optional[int] = None
+    # Float because LiFi returns fractional minutes (e.g. 5.5). Pydantic 2.x
+    # refuses to coerce floats to int implicitly — keeping this as float
+    # tolerates whatever LiFi sends without losing precision. Frontend
+    # ceils/rounds for display.
+    estimated_time: Optional[float] = None
 
 
 class RouteOption(BaseModel):
@@ -79,7 +83,11 @@ class RouteOption(BaseModel):
     to_amount: str
     to_amount_min: str
     deposit_amount: str
-    estimated_time: Optional[int] = None
+    # Float because LiFi returns fractional minutes (e.g. 5.5). Pydantic 2.x
+    # refuses to coerce floats to int implicitly — keeping this as float
+    # tolerates whatever LiFi sends without losing precision. Frontend
+    # ceils/rounds for display.
+    estimated_time: Optional[float] = None
     gas_cost_usd: Optional[str] = None
     tags: list[str] = []
 
@@ -92,7 +100,11 @@ class QuoteEstimate(BaseModel):
     deposit_amount: str
     estimated_shares: Optional[str] = None
     price_impact: Optional[float] = None
-    estimated_time: Optional[int] = None
+    # Float because LiFi returns fractional minutes (e.g. 5.5). Pydantic 2.x
+    # refuses to coerce floats to int implicitly — keeping this as float
+    # tolerates whatever LiFi sends without losing precision. Frontend
+    # ceils/rounds for display.
+    estimated_time: Optional[float] = None
     gas_cost_usd: Optional[str] = None
     steps: Optional[list[StepDetail]] = None
 

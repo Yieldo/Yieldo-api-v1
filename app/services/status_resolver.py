@@ -174,26 +174,51 @@ async def _resolve_record(client: httpx.AsyncClient, doc: dict) -> tuple[str | N
                 extra["bridge"] = bridge
             extra["lifi_explorer"] = f"https://explorer.li.fi/tx/{tx_hash}"
             if s == "DONE" and sub == "COMPLETED":
-                # LiFi says bridge+composer succeeded. For single-tx (composer)
-                # flows, verify the share token actually minted to the user on
-                # the dest chain. Catches the "composer call dropped silently
-                # on the dest chain" failure mode where LiFi reports DONE but
-                # no shares ever arrived. Two-step flows are handled later by
-                # mirroring the child record's status — no verification here
-                # because the dest tx is just the asset delivery, not the deposit.
+                # LiFi says bridge+composer succeeded.
                 is_two_step = bool((doc.get("response") or {}).get("two_step"))
-                if not is_two_step and rcv.get("txHash"):
-                    rpc = _rpc_url(to_chain)
-                    user = (doc.get("user_address") or "").lower()
-                    share_token = _share_token_for(doc)
-                    if rpc and user and share_token:
-                        dest_receipt = await _rpc_get_receipt(client, rpc, rcv["txHash"])
-                        if dest_receipt and not _verify_share_mint(dest_receipt, share_token, user):
-                            extra["resolution_note"] = "Bridge succeeded but the deposit did not complete on the destination chain. Funds may have been refunded to your wallet."
-                            extra["received_token"] = (rcv.get("token") or {}).get("address")
-                            extra["received_amount"] = rcv.get("amount")
-                            return "partial", extra
-                return "completed", extra
+                if not is_two_step:
+                    # Single-tx (composer) flow — verify the share token actually
+                    # minted on dest. Catches "composer call dropped silently"
+                    # where LiFi reports DONE but no shares ever arrived.
+                    if rcv.get("txHash"):
+                        rpc = _rpc_url(to_chain)
+                        user = (doc.get("user_address") or "").lower()
+                        share_token = _share_token_for(doc)
+                        if rpc and user and share_token:
+                            dest_receipt = await _rpc_get_receipt(client, rpc, rcv["txHash"])
+                            if dest_receipt and not _verify_share_mint(dest_receipt, share_token, user):
+                                extra["resolution_note"] = "Bridge succeeded but the deposit did not complete on the destination chain. Funds may have been refunded to your wallet."
+                                extra["received_token"] = (rcv.get("token") or {}).get("address")
+                                extra["received_amount"] = rcv.get("amount")
+                                return "partial", extra
+                    return "completed", extra
+                # Cross-chain TWO-STEP: bridge being DONE means tokens arrived
+                # in the user's wallet — but the user STILL has to sign step 2
+                # to actually deposit. Mark completed only after the child
+                # record's terminal status confirms the deposit actually ran.
+                # This is the bug that previously marked records "completed"
+                # when wxDAI was sitting un-deposited in the user's wallet
+                # because step 2 never executed (e.g., wagmi chain switch fail).
+                db = database._db  # noqa: SLF001
+                child = await db["transactions"].find_one(
+                    {"parent_tracking_id": str(doc["_id"])},
+                    sort=[("created_at", -1)],
+                ) if db is not None else None
+                if child:
+                    cs = child.get("status")
+                    if cs in ("completed", "failed", "partial"):
+                        return cs, extra
+                    return None, extra  # child still pending — keep watching
+                # No child record exists → step 2 was never even built.
+                # After the abandon window, surface it as "partial — bridged
+                # but deposit step never started" so the user knows funds
+                # arrived in their wallet.
+                if created and (datetime.now(timezone.utc) - created).total_seconds() > ABANDON_HOURS * 3600:
+                    extra["resolution_note"] = "Bridge delivered to your wallet, but the vault deposit step never ran. The bridged tokens are in your wallet — open the vault on the destination chain and deposit them in one click."
+                    extra["received_token"] = (rcv.get("token") or {}).get("address")
+                    extra["received_amount"] = rcv.get("amount")
+                    return "partial", extra
+                return None, extra
             if s == "DONE" and sub in ("PARTIAL", "REFUNDED"):
                 extra["received_token"] = (rcv.get("token") or {}).get("address")
                 extra["received_amount"] = rcv.get("amount")

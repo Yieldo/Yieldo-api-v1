@@ -76,10 +76,16 @@ class EdgeCacheMiddleware(BaseHTTPMiddleware):
                 match = (prefix, s_maxage, swr)
         if match:
             _, s_maxage, swr = match
-            # public + s-maxage means: browsers may not cache (no max-age),
-            # but Cloudflare WILL cache for s-maxage seconds. SWR lets stale
-            # responses serve while a background fetch refreshes.
-            response.headers["Cache-Control"] = f"public, s-maxage={s_maxage}, stale-while-revalidate={swr}"
+            # max-age caches in the browser (no extra config needed) — even a
+            # short window kills repeat-hit latency during the same page session.
+            # s-maxage caches at Cloudflare edge IF a Cache Rule is set in the
+            # Cloudflare dashboard (CF default behavior bypasses JSON unless
+            # told otherwise). SWR lets stale responses serve while refetching.
+            browser_max = min(15, s_maxage)
+            response.headers["Cache-Control"] = (
+                f"public, max-age={browser_max}, s-maxage={s_maxage}, "
+                f"stale-while-revalidate={swr}"
+            )
             response.headers["Vary"] = "Accept-Encoding"
         return response
 

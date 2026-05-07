@@ -1,11 +1,87 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from app.routes import vaults, quote, status, info, partners, kols, deposits, users, withdraw, positions, scores, intel, applications, admin
 from app.services.vault import load_vaults, get_all_vaults_raw, start_registry_audit_thread
 from app.services import database, min_deposit, status_resolver, withdraw_resolver
 from app.config import get_settings
 import asyncio
+
+
+# Edge-cache hints — Cloudflare honors `Cache-Control` with `s-maxage` to
+# cache origin responses without us having to set up cache rules in their UI.
+# Each entry is (path-prefix, s-maxage-secs, swr-secs).
+#
+# Tuning:
+# - Read-heavy public endpoints get short s-maxage so admin toggles + new
+#   indexer data still propagate within a tight window.
+# - Score-history is mostly historical → can cache longer.
+# - Mutating endpoints (POST/PATCH) and user-specific paths (positions,
+#   deposits, withdraw, admin/me/vaults) NEVER get cached — they bypass.
+_EDGE_CACHE_RULES = (
+    # (prefix, s-maxage, stale-while-revalidate)
+    ("/v1/vaults",            30,  60),    # list + detail; admin toggles propagate ≤30s
+    ("/v1/intel/feed",        30,  60),
+    ("/v1/intel/high",        30,  60),
+    ("/v1/intel/notable",     30,  60),
+    ("/v1/intel/activity",    30,  60),
+    ("/v1/scores/history",   120, 300),    # historical; safely cacheable longer
+    ("/v1/scores/timeseries",120, 300),
+    ("/v1/scores/leaderboard",60, 120),
+    ("/v1/scores/movers",     60, 120),
+    ("/health",              300, 300),    # static {"status":"ok"} — cache hard
+)
+# Path prefixes that must NEVER be edge-cached (user-specific or mutates state).
+_NO_CACHE_PREFIXES = (
+    "/v1/admin",
+    "/v1/quote",
+    "/v1/withdraw",
+    "/v1/positions",
+    "/v1/deposits",
+    "/v1/users",
+    "/v1/applications",
+    "/v1/kols",
+    "/v1/creators",
+    "/v1/partners",
+    "/v1/status",
+)
+
+
+class EdgeCacheMiddleware(BaseHTTPMiddleware):
+    """Tags safe GET responses with Cache-Control so Cloudflare can cache
+    them at the edge. Per-request profile observed: a `/health` round-trip
+    is 235ms cold-network even though the handler is 2ms locally — the
+    network IS the slowness. Edge caching on read-heavy endpoints means
+    most user requests skip the origin entirely.
+    """
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        # Only cache idempotent GETs with successful payloads.
+        if request.method != "GET" or response.status_code != 200:
+            return response
+        path = request.url.path
+        # Auth-bearing requests are user-specific; never cache.
+        if request.headers.get("authorization"):
+            return response
+        # Explicit no-cache prefixes win over any rule below.
+        for p in _NO_CACHE_PREFIXES:
+            if path.startswith(p):
+                response.headers.setdefault("Cache-Control", "no-store")
+                return response
+        # Apply the longest matching prefix rule.
+        match = None
+        for prefix, s_maxage, swr in _EDGE_CACHE_RULES:
+            if path.startswith(prefix) and (match is None or len(prefix) > len(match[0])):
+                match = (prefix, s_maxage, swr)
+        if match:
+            _, s_maxage, swr = match
+            # public + s-maxage means: browsers may not cache (no max-age),
+            # but Cloudflare WILL cache for s-maxage seconds. SWR lets stale
+            # responses serve while a background fetch refreshes.
+            response.headers["Cache-Control"] = f"public, s-maxage={s_maxage}, stale-while-revalidate={swr}"
+            response.headers["Vary"] = "Accept-Encoding"
+        return response
 
 
 @asynccontextmanager
@@ -74,6 +150,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(EdgeCacheMiddleware)
 
 app.include_router(vaults.router)
 app.include_router(quote.router)

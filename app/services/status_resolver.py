@@ -317,10 +317,33 @@ async def _tick(client: httpx.AsyncClient) -> None:
         }
         # Guard against races with the live /v1/status endpoint — only flip if
         # still pending/submitted, never overwrite a real terminal state.
-        await db["transactions"].update_one(
+        result = await db["transactions"].update_one(
             {"_id": doc["_id"], "status": {"$in": ["pending", "submitted"]}},
             update,
         )
+        # Attribution hook (Eddy spec): when a deposit lands in `completed`,
+        # bucket it as attributed/unattributed based on the wallet's most
+        # recent click within the 7d window. `classify_deposit_for_attribution`
+        # is idempotent via the tx_hash dedupe key, so re-firing on resolver
+        # restarts won't double-count. We only fire if our update actually
+        # flipped the row — guards against duplicate writes from races.
+        if result.modified_count > 0 and new_status == "completed":
+            try:
+                wallet = (doc.get("user_address") or "").lower()
+                vault  = doc.get("vault_id")
+                amount = None
+                # Amount lives in a couple of shapes depending on the flow.
+                # Try the request payload first, then top-level fields.
+                req = doc.get("request") or {}
+                amount = req.get("amount") or doc.get("amount") or doc.get("deposit_amount")
+                tx_hash = doc.get("tx_hash") or doc.get("dest_tx_hash")
+                if wallet and vault and tx_hash:
+                    await database.classify_deposit_for_attribution(
+                        wallet=wallet, vault=vault, amount=str(amount) if amount is not None else None,
+                        tx_hash=tx_hash,
+                    )
+            except Exception as e:
+                logger.warning(f"attribution hook failed for {doc.get('_id')}: {e}")
         n_resolved += 1
     if n_resolved:
         logger.info(f"status_resolver tick: resolved={n_resolved} still_pending={n_left}")

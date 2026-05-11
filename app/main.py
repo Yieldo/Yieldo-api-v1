@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-from app.routes import vaults, quote, status, info, partners, kols, deposits, users, withdraw, positions, scores, intel, applications, admin, og
+from app.routes import vaults, quote, status, info, partners, kols, deposits, users, withdraw, positions, scores, intel, applications, admin, og, track, dashboard
 from app.services.vault import load_vaults, get_all_vaults_raw, start_registry_audit_thread
 from app.services import database, min_deposit, status_resolver, withdraw_resolver
 from app.config import get_settings
@@ -30,6 +30,7 @@ _EDGE_CACHE_RULES = (
     ("/v1/scores/timeseries",120, 300),
     ("/v1/scores/leaderboard",60, 120),
     ("/v1/scores/movers",     60, 120),
+    ("/v1/dashboard",         60, 300),    # attribution metrics — not realtime critical
     ("/health",              300, 300),    # static {"status":"ok"} — cache hard
 )
 # Path prefixes that must NEVER be edge-cached (user-specific or mutates state).
@@ -179,6 +180,8 @@ app.include_router(intel.router)
 app.include_router(applications.router)
 app.include_router(admin.router)
 app.include_router(og.router)
+app.include_router(track.router)
+app.include_router(dashboard.router)
 
 
 @app.get("/health")

@@ -173,6 +173,60 @@ async def _ensure_indexes():
         await user_logins.create_index([("address", 1), ("created_at", -1)])
         await user_logins.create_index("created_at")
 
+        # ---- Attribution collections (Eddy spec) ----
+        # `click_event` rows are the entry point — every visit from an X
+        # share URL writes one. `click_id` is a server-generated opaque
+        # token that the frontend stores in a 7-day cookie, then sends back
+        # at SIWE login so we can link the click to a wallet.
+        click_event = _db["click_event"]
+        await click_event.create_index("click_id", unique=True)
+        await click_event.create_index("tweet_id")
+        await click_event.create_index("template")
+        await click_event.create_index("cohort")
+        await click_event.create_index("ts")
+        # Auto-expire click events after 30d — we already have the
+        # downstream wallet_attribution row by then; raw clicks are only
+        # useful for the dedupe window.
+        await click_event.create_index("ts", expireAfterSeconds=30 * 24 * 3600, name="ts_ttl_30d")
+
+        # `wallet_attribution` is the canonical wallet↔click join. Written
+        # when an attributed visitor signs in with their wallet. The 7-day
+        # window for deposits is computed against `attributed_at`.
+        wallet_attribution = _db["wallet_attribution"]
+        await wallet_attribution.create_index([("wallet", 1), ("attributed_at", -1)])
+        await wallet_attribution.create_index("source_tweet_id")
+        await wallet_attribution.create_index("template")
+        await wallet_attribution.create_index("vault")
+        await wallet_attribution.create_index("click_id")
+
+        # `attributed_deposit` and `unattributed_deposit` are written by the
+        # status resolver when a deposit lands in a terminal "completed"
+        # state. The split is so dashboards can answer "what share of
+        # deposits did the X campaign source" without per-row filtering.
+        attributed_deposit = _db["attributed_deposit"]
+        await attributed_deposit.create_index("source_tweet_id")
+        await attributed_deposit.create_index("vault")
+        await attributed_deposit.create_index("template")
+        await attributed_deposit.create_index("wallet")
+        await attributed_deposit.create_index("ts")
+        # Idempotency: the resolver may revisit the same transaction; we
+        # never want to double-count a deposit toward attribution.
+        await attributed_deposit.create_index("tx_hash", unique=True, sparse=True)
+
+        unattributed_deposit = _db["unattributed_deposit"]
+        await unattributed_deposit.create_index("wallet")
+        await unattributed_deposit.create_index("vault")
+        await unattributed_deposit.create_index("ts")
+        await unattributed_deposit.create_index("tx_hash", unique=True, sparse=True)
+
+        # `retention_check` is updated by a scheduled job that snapshots the
+        # depositor's balance at +7/+30/+90 days. Compound index lets the
+        # dashboard build retention curves keyed off (vault, template).
+        retention_check = _db["retention_check"]
+        await retention_check.create_index([("wallet", 1), ("vault", 1)], unique=True)
+        await retention_check.create_index("attributed_deposit_id")
+        await retention_check.create_index("last_checked_at")
+
     except Exception as e:
         logger.error(f"MongoDB index creation failed: {e}")
 
@@ -1327,6 +1381,198 @@ async def delete_all_users():
     await _db["users"].delete_many({})
     await _db["user_sessions"].delete_many({})
     await _db["user_nonces"].delete_many({})
+
+
+# --------------------------------------------------------------------------
+# Attribution (Eddy spec) — click → wallet → deposit funnel
+#
+# Privacy invariant: NO PII. We deliberately never store an X handle next to
+# a wallet. The link is wallet ↔ tweet_id, where tweet_id is public. Don't
+# add fields here that would let us recover the handle from a wallet.
+# --------------------------------------------------------------------------
+
+# How far back a click can still attribute a deposit. Matches industry
+# standard ad-attribution windows (Twitter Ads, Meta, Google all use 7d for
+# view-through and 1-7d for click-through).
+ATTRIBUTION_WINDOW_DAYS = 7
+
+
+async def record_click_event(
+    *,
+    click_id: str,
+    tweet_id: Optional[str] = None,
+    vault_slug: Optional[str] = None,
+    template: Optional[str] = None,
+    cohort: Optional[str] = None,
+    src: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> bool:
+    """Insert a click_event row. Returns True on success."""
+    if _db is None:
+        return False
+    try:
+        await _db["click_event"].insert_one({
+            "click_id": click_id,
+            "tweet_id": tweet_id,
+            "vault_slug": vault_slug,
+            "template": template,
+            "cohort": cohort,
+            "src": src,
+            "user_agent": (user_agent or "")[:512],   # bound the column
+            "ts": datetime.now(timezone.utc),
+        })
+        return True
+    except Exception as e:
+        logger.warning(f"record_click_event failed: {e}")
+        return False
+
+
+async def get_click_event(click_id: str) -> Optional[dict]:
+    if _db is None or not click_id:
+        return None
+    return await _db["click_event"].find_one({"click_id": click_id})
+
+
+async def record_wallet_attribution(
+    *,
+    wallet: str,
+    click_id: str,
+    click: Optional[dict] = None,
+) -> bool:
+    """Link a wallet to a click. Idempotent — repeated calls for the same
+    (wallet, click_id) pair are no-ops so a user signing in twice doesn't
+    create duplicate attribution rows."""
+    if _db is None or not wallet or not click_id:
+        return False
+    try:
+        click = click or await get_click_event(click_id)
+        if not click:
+            return False
+        wallet = wallet.lower()
+        # Upsert keyed on (wallet, click_id) — re-signing with the same click
+        # cookie just refreshes attributed_at, doesn't multiply the row.
+        await _db["wallet_attribution"].update_one(
+            {"wallet": wallet, "click_id": click_id},
+            {"$set": {
+                "wallet": wallet,
+                "click_id": click_id,
+                "source_tweet_id": click.get("tweet_id"),
+                "vault": click.get("vault_slug"),
+                "template": click.get("template"),
+                "cohort": click.get("cohort"),
+                "attributed_at": datetime.now(timezone.utc),
+            }},
+            upsert=True,
+        )
+        return True
+    except Exception as e:
+        logger.warning(f"record_wallet_attribution failed: {e}")
+        return False
+
+
+async def get_recent_wallet_attribution(wallet: str) -> Optional[dict]:
+    """Most recent attribution for this wallet within the 7d window. Returns
+    None if there's no attributable click — caller treats that as
+    `unattributed_deposit`."""
+    if _db is None or not wallet:
+        return None
+    cutoff = datetime.now(timezone.utc) - timedelta(days=ATTRIBUTION_WINDOW_DAYS)
+    return await _db["wallet_attribution"].find_one(
+        {"wallet": wallet.lower(), "attributed_at": {"$gte": cutoff}},
+        sort=[("attributed_at", -1)],
+    )
+
+
+async def record_attributed_deposit(
+    *,
+    wallet: str,
+    vault: str,
+    amount: Optional[str] = None,
+    tx_hash: Optional[str] = None,
+    attribution: dict,
+) -> bool:
+    """Write an attributed_deposit row. `tx_hash` is the dedupe key so the
+    status resolver can re-run safely without double-counting. We require
+    it because without it we can't safely upsert — callers that don't have
+    a tx_hash should skip attribution entirely rather than create a row
+    that can be duplicated on the next resolver tick."""
+    if _db is None or not wallet or not vault or not tx_hash:
+        return False
+    try:
+        await _db["attributed_deposit"].update_one(
+            {"tx_hash": tx_hash},
+            {"$setOnInsert": {
+                "wallet": wallet.lower(),
+                "source_tweet_id": attribution.get("source_tweet_id"),
+                "vault": vault,
+                "template": attribution.get("template"),
+                "cohort": attribution.get("cohort"),
+                "click_id": attribution.get("click_id"),
+                "amount": amount,
+                "tx_hash": tx_hash,
+                "ts": datetime.now(timezone.utc),
+            }},
+            upsert=True,
+        )
+        return True
+    except Exception as e:
+        logger.warning(f"record_attributed_deposit failed: {e}")
+        return False
+
+
+async def record_unattributed_deposit(
+    *,
+    wallet: str,
+    vault: str,
+    amount: Optional[str] = None,
+    tx_hash: Optional[str] = None,
+) -> bool:
+    """Write an unattributed_deposit row. Same idempotency rule — tx_hash
+    is required to allow safe re-execution by the status resolver."""
+    if _db is None or not wallet or not vault or not tx_hash:
+        return False
+    try:
+        await _db["unattributed_deposit"].update_one(
+            {"tx_hash": tx_hash},
+            {"$setOnInsert": {
+                "wallet": wallet.lower(),
+                "vault": vault,
+                "amount": amount,
+                "tx_hash": tx_hash,
+                "ts": datetime.now(timezone.utc),
+            }},
+            upsert=True,
+        )
+        return True
+    except Exception as e:
+        logger.warning(f"record_unattributed_deposit failed: {e}")
+        return False
+
+
+async def classify_deposit_for_attribution(
+    *,
+    wallet: str,
+    vault: str,
+    amount: Optional[str] = None,
+    tx_hash: Optional[str] = None,
+) -> str:
+    """Convenience wrapper for the status resolver: look up the wallet's
+    most recent attribution inside the 7d window and route the deposit to
+    the right collection. Returns 'attributed' | 'unattributed' | 'skip'.
+    """
+    if not wallet or not vault:
+        return "skip"
+    attribution = await get_recent_wallet_attribution(wallet)
+    if attribution:
+        ok = await record_attributed_deposit(
+            wallet=wallet, vault=vault, amount=amount, tx_hash=tx_hash,
+            attribution=attribution,
+        )
+        return "attributed" if ok else "skip"
+    ok = await record_unattributed_deposit(
+        wallet=wallet, vault=vault, amount=amount, tx_hash=tx_hash,
+    )
+    return "unattributed" if ok else "skip"
 
 
 # --------------------------------------------------------------------------

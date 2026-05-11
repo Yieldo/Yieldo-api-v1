@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-from app.routes import vaults, quote, status, info, partners, kols, deposits, users, withdraw, positions, scores, intel, applications, admin
+from app.routes import vaults, quote, status, info, partners, kols, deposits, users, withdraw, positions, scores, intel, applications, admin, og
 from app.services.vault import load_vaults, get_all_vaults_raw, start_registry_audit_thread
 from app.services import database, min_deposit, status_resolver, withdraw_resolver
 from app.config import get_settings
@@ -45,6 +45,11 @@ _NO_CACHE_PREFIXES = (
     "/v1/creators",
     "/v1/partners",
     "/v1/status",
+    # OG card endpoints set their own image-appropriate Cache-Control header
+    # (max-age=300, s-maxage=3600, swr=86400). Letting this middleware
+    # overwrite it would either over-cache (the JSON rule's max-age is too
+    # short) or strip the SWR window that keeps the image hot through scrapes.
+    "/v1/og",
 )
 
 
@@ -173,6 +178,7 @@ app.include_router(scores.router)
 app.include_router(intel.router)
 app.include_router(applications.router)
 app.include_router(admin.router)
+app.include_router(og.router)
 
 
 @app.get("/health")

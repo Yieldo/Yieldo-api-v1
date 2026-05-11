@@ -42,7 +42,8 @@
             "group": "Technical Documentation",
             "pages": [
               "index",
-              "getting-started"
+              "getting-started",
+              "security/hashlock-audit"
             ]
           },
           {

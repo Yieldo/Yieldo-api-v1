@@ -1302,6 +1302,18 @@ async def get_user_session(token_hash: str) -> Optional[dict]:
     })
 
 
+async def extend_user_session(token_hash: str, new_expires_at: datetime) -> None:
+    """Bump a session's expiry to `new_expires_at`. Used by the sliding-window
+    refresh in `get_current_user`. Safe to call on a session whose expiry is
+    already in the future — Mongo's TTL index honours the latest value."""
+    if _db is None:
+        return
+    await _db["user_sessions"].update_one(
+        {"token_hash": token_hash},
+        {"$set": {"expires_at": new_expires_at}},
+    )
+
+
 async def delete_user_sessions(address: str):
     if _db is None:
         return

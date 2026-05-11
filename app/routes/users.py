@@ -12,7 +12,20 @@ from app.services import database
 
 router = APIRouter(prefix="/v1/users", tags=["users"])
 
-SESSION_DURATION_HOURS = 2
+# Initial session length, plus the sliding-window rule below.
+# Why 48h: the previous 2h forced every returning user to re-sign within the
+# same business day, which felt like "logged out" rather than "session
+# expired." 48h covers an overnight close + next-day reopen for the common
+# case, and the sliding-window extension below keeps active users signed in
+# indefinitely while still cutting off truly idle wallets.
+SESSION_DURATION_HOURS = 48
+
+# When an authenticated request comes in and the remaining lifetime is below
+# this threshold, bump the session back to a full 48h. This implements the
+# "rolling expiry": every page reload / API call within the last day of the
+# window pushes the expiry forward. We don't bump on every call (would write
+# to Mongo on every request) — only when the remaining TTL drops below this.
+SESSION_REFRESH_THRESHOLD_HOURS = 24
 
 
 async def get_current_user(request: Request) -> dict:
@@ -20,12 +33,35 @@ async def get_current_user(request: Request) -> dict:
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing auth token")
     token = auth[7:]
-    session = await database.get_user_session(hash_key(token))
+    token_hash = hash_key(token)
+    session = await database.get_user_session(token_hash)
     if not session:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
     user = await database.get_user_by_address(session["address"])
     if not user or user.get("status") != "active":
         raise HTTPException(status_code=403, detail="Account inactive")
+
+    # Sliding-window refresh: any authenticated request inside the last
+    # SESSION_REFRESH_THRESHOLD_HOURS resets the clock to SESSION_DURATION_HOURS.
+    # The frontend hits /v1/users/me on every page load to validate the
+    # session, so just keeping that endpoint reachable is enough to stay
+    # signed in. Truly idle wallets fall off the back end of the window.
+    try:
+        expires_at = session.get("expires_at")
+        if expires_at is not None:
+            # Mongo gives this back as a naive UTC datetime; treat it as such.
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            if (expires_at - now) < timedelta(hours=SESSION_REFRESH_THRESHOLD_HOURS):
+                new_expiry = now + timedelta(hours=SESSION_DURATION_HOURS)
+                await database.extend_user_session(token_hash, new_expiry)
+    except Exception:
+        # Never let a refresh-failure path 401 a valid session. If the bump
+        # fails we just keep the old expiry — the user will re-sign at the
+        # window's natural end.
+        pass
+
     return user
 
 

@@ -170,13 +170,25 @@ ASSET_TOKEN_CONFIG: dict[int, dict[str, tuple[str, int]]] = {
         "usdc": ("0x754704Bc059F8C67012fEd69BC8A327a5aafb603", 6),
     },
     100: {
-        # Gnosis chain. wxdai is the wrapped form of native xDAI and is the
-        # asset Spark Savings xDAI (sDAI) accepts on deposit. usdc.e is the
-        # bridged-from-mainnet variant most commonly held on Gnosis.
-        "wxdai": ("0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d", 18),
-        "xdai":  ("0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d", 18),  # alias to wxdai
-        "usdc":  ("0x2a22f9c3b484c3629090FeED35F17Ff8F88f76F0", 6),    # USDC.e bridged
-        "usdt":  ("0x4ECaBa5870353805a9F068101A40E0f32ed605C6", 6),
+        # Gnosis chain. wxdai is the wrapped form of native xDAI. usdc is the
+        # newer native-issued USDC; usdc.e is the legacy bridged-from-mainnet
+        # variant (different contract, both still in circulation). Addresses
+        # below were verified by reading UNDERLYING_ASSET_ADDRESS() on the
+        # corresponding Aave V3 Gnosis aTokens.
+        "wxdai":  ("0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d", 18),
+        "xdai":   ("0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d", 18),  # alias to wxdai
+        "usdc":   ("0xDDAfbb505ad214D7b80b1f830fcCc89B60fb7A83", 6),    # native USDC on Gnosis
+        "usdc.e": ("0x2a22f9c3b484c3629090FeED35F17Ff8F88f76F0", 6),    # bridged USDC.e (pre-native)
+        "usdt":   ("0x4ECaBa5870353805a9F068101A40E0f32ed605C6", 6),
+        # Tokens needed by Aave Gnosis vault entries (currently type=unsupported
+        # for deposits, but the registry loader still needs to resolve their
+        # asset to keep them in the /v1/vaults response).
+        "eure":   ("0xcB444e90D8198415266c6a2724b7900fb12FC56E", 18),
+        "gho":    ("0xfc421aD3C883Bf9E7C4f42dE845C4e4405799e73", 18),
+        "gno":    ("0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb", 18),
+        "weth":   ("0x6A023CCd1ff6F2045C3309768eAd9E68F978f6e1", 18),
+        "sdai":   ("0xaf204776c7245bF4147c2612BF6e5972Ee483701", 18),
+        "wsteth": ("0x6C76971f98945AE98dD7d4DFcA8711ebea946eA6", 18),
     },
 }
 

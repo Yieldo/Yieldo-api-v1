@@ -18,9 +18,10 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.services import database, score_explainer
+from app.services import score_explain_ratelimit as explain_ratelimit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/scores", tags=["scores"])
@@ -169,22 +170,45 @@ _EXPLAIN_DIMS = ("capital", "performance", "risk", "trust")
 
 
 @router.get("/explain/{vault_id:path}/{dimension}")
-async def explain(vault_id: str, dimension: str):
+async def explain(vault_id: str, dimension: str, request: Request):
     """1-2 sentence AI-generated explanation of a vault's sub-score.
 
-    Cached per (vault_id, dimension, UTC date) in the wallets DB so each unique
-    vault+dimension+day costs at most one Anthropic API call. Falls back to a
-    deterministic template if the API key isn't configured.
+    Served from a per-day cache that's populated by a nightly pre-warm cron,
+    so virtually every legitimate request is a cache HIT and returns
+    instantly without invoking the CLI. The slow path (cache MISS → CLI call)
+    is rate-limited per-IP and globally to keep the subscription safe from
+    scrapers that try to iterate every (vault, dim) combination.
     """
     if dimension not in _EXPLAIN_DIMS:
         raise HTTPException(status_code=400, detail=f"dimension must be one of {_EXPLAIN_DIMS}")
+
+    # Fast path: cached entry for today. No rate limit, no CLI cost.
     try:
-        out = await score_explainer.get_or_generate(vault_id, dimension)
+        cached = await score_explainer.check_cache(vault_id, dimension)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    if cached is not None:
+        if isinstance(cached.get("generated_at"), datetime):
+            cached["generated_at"] = cached["generated_at"].isoformat()
+        return cached
+
+    # Slow path: cache miss. Throttle before letting the request reach the
+    # CLI — otherwise a scraper could brute-force one fresh combo per request
+    # and burn the subscription. Counters reset on a sliding 60s window.
+    ip = explain_ratelimit.client_ip(request)
+    allowed, reason = explain_ratelimit.check_and_record_miss(ip)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many fresh-explanation requests ({reason}). Try again in a minute.",
+        )
+
+    try:
+        out = await score_explainer.generate_fresh(vault_id, dimension)
     except LookupError:
         raise HTTPException(status_code=404, detail=f"No score snapshot for {vault_id}")
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
-    # ISO-format the timestamp for JSON friendliness
     if isinstance(out.get("generated_at"), datetime):
         out["generated_at"] = out["generated_at"].isoformat()
     return out

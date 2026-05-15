@@ -260,9 +260,40 @@ def _day_key(now: Optional[datetime] = None) -> str:
     return now.strftime("%Y-%m-%d")
 
 
-async def get_or_generate(vault_id: str, dimension: str) -> dict:
-    """Returns {explanation, score, dimension, generated_at, cached, source}.
-    Raises ValueError on bad dimension. Raises LookupError if no snapshot found.
+async def check_cache(vault_id: str, dimension: str) -> Optional[dict]:
+    """Return the cached row if one exists for today, else None. Cheap — a
+    single Mongo `find_one` keyed by composite _id. Routes call this before
+    deciding whether a request needs to be rate-limited."""
+    dimension = (dimension or "").lower()
+    if dimension not in _DIM_FIELDS:
+        raise ValueError(f"Unknown dimension: {dimension}")
+    wallets_db = database.get_db() if hasattr(database, "get_db") else None
+    if wallets_db is None:
+        wallets_db = getattr(database, "_db", None)
+    if wallets_db is None:
+        return None
+    cache_id = f"{vault_id}:{dimension}:{_day_key()}"
+    existing = await wallets_db["score_explanations"].find_one({"_id": cache_id})
+    if existing and existing.get("explanation"):
+        return {
+            "vault_id": vault_id,
+            "dimension": dimension,
+            "score": existing.get("score"),
+            "explanation": existing["explanation"],
+            "generated_at": existing.get("generated_at"),
+            "cached": True,
+            "source": existing.get("source", "cache"),
+        }
+    return None
+
+
+async def generate_fresh(vault_id: str, dimension: str) -> dict:
+    """Generate (or regenerate) the explanation for today, ignoring cache.
+    Writes through to the cache on success/failure. Caller is responsible
+    for rate-limiting before invoking this — every call costs one CLI run.
+
+    Raises ValueError on bad dimension, LookupError if no snapshot exists,
+    RuntimeError if the indexer DB is unreachable.
     """
     dimension = (dimension or "").lower()
     if dimension not in _DIM_FIELDS:
@@ -274,21 +305,6 @@ async def get_or_generate(vault_id: str, dimension: str) -> dict:
     wallets_db = database.get_db() if hasattr(database, "get_db") else None
     if wallets_db is None:
         wallets_db = getattr(database, "_db", None)
-
-    day_key = _day_key()
-    cache_id = f"{vault_id}:{dimension}:{day_key}"
-    if wallets_db is not None:
-        existing = await wallets_db["score_explanations"].find_one({"_id": cache_id})
-        if existing and existing.get("explanation"):
-            return {
-                "vault_id": vault_id,
-                "dimension": dimension,
-                "score": existing.get("score"),
-                "explanation": existing["explanation"],
-                "generated_at": existing.get("generated_at"),
-                "cached": True,
-                "source": existing.get("source", "cache"),
-            }
 
     snapshot = await indexer_db["score_snapshots"].find_one(
         {"vault_id": vault_id}, sort=[("ts", -1)]
@@ -310,6 +326,8 @@ async def get_or_generate(vault_id: str, dimension: str) -> dict:
         explanation = _template_fallback(vault_name, dimension, score, ctx_text)
 
     now = datetime.now(timezone.utc)
+    day_key = _day_key(now)
+    cache_id = f"{vault_id}:{dimension}:{day_key}"
     doc = {
         "_id": cache_id,
         "vault_id": vault_id,
@@ -337,3 +355,13 @@ async def get_or_generate(vault_id: str, dimension: str) -> dict:
         "cached": False,
         "source": source,
     }
+
+
+async def get_or_generate(vault_id: str, dimension: str) -> dict:
+    """Convenience wrapper: cache-or-generate without rate-limiting. Use
+    `check_cache` + `generate_fresh` directly from request handlers so the
+    rate limiter can run between them."""
+    cached = await check_cache(vault_id, dimension)
+    if cached is not None:
+        return cached
+    return await generate_fresh(vault_id, dimension)

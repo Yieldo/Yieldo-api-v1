@@ -60,9 +60,13 @@ def _resolve_claude_bin() -> Optional[str]:
 _DIM_FIELDS: dict[str, list[tuple[str, str, str]]] = {
     "capital": [
         ("metrics.C01_USD",  "TVL (USD)",            "money"),
-        ("metrics.C02_1d",   "TVL change 24h",       "pct"),
-        ("metrics.C02_7d",   "TVL change 7d",        "pct"),
-        ("metrics.C02_30d",  "TVL change 30d",       "pct"),
+        # C02_* and P08_* are stored as already-scaled percentages in the
+        # snapshot (e.g. -1.04 means -1.04%), matching how the UI renders
+        # them. P04 is the exception — it's a fraction (0.05 = 5%), so it
+        # uses "pct" which multiplies by 100.
+        ("metrics.C02_1d",   "TVL change 24h",       "pct_raw"),
+        ("metrics.C02_7d",   "TVL change 7d",        "pct_raw"),
+        ("metrics.C02_30d",  "TVL change 30d",       "pct_raw"),
         ("metrics.R09_top1", "Top-1 holder share",   "pct_raw"),
         ("metrics.R09_top5", "Top-5 holder share",   "pct_raw"),
         ("metrics.C07",      "Deposit type",         "passthrough"),
@@ -73,8 +77,8 @@ _DIM_FIELDS: dict[str, list[tuple[str, str, str]]] = {
         ("metrics.P01_30d",       "APY 30d avg",             "pct_raw"),
         ("metrics.benchmark_apy", "Benchmark APY (Aave)",    "pct_raw"),
         ("metrics.P03_7d",        "APY vs benchmark (7d)",   "ratio"),
-        ("metrics.P04_30d",       "APY volatility 30d",      "pct"),
-        ("metrics.P08_30d",       "Max drawdown 30d",        "pct"),
+        ("metrics.P04_30d",       "APY volatility 30d",      "pct"),       # fraction (UI multiplies by 100)
+        ("metrics.P08_30d",       "Max drawdown 30d",        "pct_raw"),    # already-scaled %
         ("metrics.P05",           "Sharpe ratio",            "float"),
         ("metrics.P13",           "Yield type",              "passthrough"),
     ],
@@ -82,8 +86,8 @@ _DIM_FIELDS: dict[str, list[tuple[str, str, str]]] = {
         ("metrics.R09_top1", "Top-1 holder share",      "pct_raw"),
         ("metrics.R09_top5", "Top-5 holder share",      "pct_raw"),
         ("metrics.C07",      "Withdrawal latency",      "passthrough"),
-        ("metrics.P08_30d",  "Max drawdown 30d",        "pct"),
-        ("metrics.P08_90d",  "Max drawdown 90d",        "pct"),
+        ("metrics.P08_30d",  "Max drawdown 30d",        "pct_raw"),   # already-scaled %
+        ("metrics.P08_90d",  "Max drawdown 90d",        "pct_raw"),   # already-scaled %
     ],
     "trust": [
         ("metrics.T01_30d",  "Capital retention 30d",   "pct_raw"),

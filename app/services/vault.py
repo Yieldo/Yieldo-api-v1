@@ -56,8 +56,20 @@ def load_vaults():
         vault_id = f"{chain_id}:{v['address'].lower()}"
         resolved = _resolve_asset(chain_id, v["asset"], v["address"])
         if resolved is None:
-            logger.warning(f"Skipping vault {vault_id} ({v['name']}): asset unresolvable")
-            continue
+            # type=unsupported vaults can be listed without a resolvable asset
+            # address — deposits are blocked anyway, so the loader's normal
+            # "skip vaults we can't deposit to" guard doesn't apply. Use the
+            # zero address as a placeholder so downstream code that expects
+            # an asset_address (UI rendering, score lookups) still works.
+            if v.get("type") == "unsupported":
+                logger.info(
+                    f"Vault {vault_id} ({v['name']}): asset unresolvable, "
+                    f"keeping as unsupported with sentinel zero asset"
+                )
+                resolved = ("0x0000000000000000000000000000000000000000", 0)
+            else:
+                logger.warning(f"Skipping vault {vault_id} ({v['name']}): asset unresolvable")
+                continue
         asset_addr, asset_decimals = resolved
         # Some vaults accept asset X for deposit but redeem to a different
         # asset Y (e.g. Midas HyperBTC: deposits WBTC, redeems cbBTC). When

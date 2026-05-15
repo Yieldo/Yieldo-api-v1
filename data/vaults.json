@@ -31,7 +31,7 @@
   {"address": "0x5f46d540b6eD704C3c8789105F30E075AA900726", "name": "Veda Liquid BTC", "chain_id": 1, "asset": "wbtc", "accepted_assets": ["wbtc", "cbbtc", "lbtc"], "type": "veda", "curator": "Ether.fi"},
   {"address": "0xd1074E0AE85610dDBA0147e29eBe0D8E5873a000", "name": "Veda PlasmaUSD", "chain_id": 1, "asset": "usdt", "type": "veda"},
   {"address": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C", "name": "Veda Liquid USD", "chain_id": 1, "asset": "usdc", "accepted_assets": ["usdc", "usdt"], "type": "veda", "curator": "Ether.fi"},
-  {"address": "0xcC476B1a49bcDf5192561e87b6Fb8ea78aa28C13", "name": "Veda Liquid EUR", "chain_id": 10, "asset": "eurc", "accepted_assets": ["eurc"], "type": "veda", "curator": "Ether.fi"},
+  {"address": "0xcC476B1a49bcDf5192561e87b6Fb8ea78aa28C13", "name": "Veda Liquid EUR", "chain_id": 10, "asset": "eurc", "accepted_assets": ["eurc"], "type": "unsupported", "curator": "Ether.fi"},
   {"address": "0x238a700eD6165261Cf8b2e544ba797BC11e466Ba", "name": "Midas Fasanara ONE", "chain_id": 1, "asset": "usdc", "type": "midas"},
   {"address": "0xDD629E5241CbC5919847783e6C96B2De4754e438", "name": "Midas mTBILL", "chain_id": 1, "asset": "usdc", "type": "midas"},
   {"address": "0x9b5528528656DBC094765E2abB79F293c21191B9", "name": "Midas Hyperithm", "chain_id": 1, "asset": "usdc", "accepted_assets": ["usdc", "dai", "usds"], "type": "midas"},

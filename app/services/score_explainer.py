@@ -193,34 +193,38 @@ async def _call_claude_cli(vault_name: str, dimension: str, score: Optional[int]
     )
 
     # Lock the CLI down hard since it's reachable via a public HTTP endpoint:
-    #   - `--allowed-tools ""` disables every tool (no Bash/Edit/WebFetch/etc),
-    #     so the only thing the model can do is emit text.
-    #   - `--disallowed-tools "*"` is a belt-and-braces deny — if any future
-    #     CLI version interprets an empty allowed list as "all", this still
-    #     blocks tool use.
+    #   - `--tools ""` disables every tool (no Bash/Edit/WebFetch/etc) per the
+    #     CLI's own help: 'Use "" to disable all tools'. The only thing the
+    #     model can do is emit text.
     #   - We deliberately do NOT pass `--permission-mode bypassPermissions`:
     #     with no tools available there's nothing to permission-prompt about,
     #     and skipping the bypass means we never grant the CLI authority to
     #     run side-effectful actions on its own.
+    #   - Prompt is sent via stdin (not as a positional arg) because
+    #     `--allowed-tools` / `--disallowed-tools` / `--tools` are variadic
+    #     ("<tools...>") and will gobble any positional argument that follows
+    #     until the next flag — so a positional prompt would get swallowed
+    #     and the CLI would error with "Input must be provided either through
+    #     stdin or as a prompt argument".
     cmd = [
         cli,
         "--print",
         "--output-format", "text",
         "--model", "haiku",
-        "--allowed-tools", "",
-        "--disallowed-tools", "*",
-        prompt,
+        "--tools", "",
     ]
 
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         try:
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=CLAUDE_TIMEOUT_SEC
+                proc.communicate(input=prompt.encode("utf-8")),
+                timeout=CLAUDE_TIMEOUT_SEC,
             )
         except asyncio.TimeoutError:
             try:

@@ -55,6 +55,13 @@ async def connect(url: str, indexer_url: Optional[str] = None):
         _indexer_db = None
 
 
+def get_db():
+    """Handle on the wallets DB (`yieldo_wallets`). Used by callers that want
+    to read/write to the API's own collections (sessions, attribution, AI
+    explanation cache, etc). Returns None if Mongo isn't connected."""
+    return _db
+
+
 def get_indexer_db():
     """Read-only handle on the indexer's `yieldo_v1` database.
 
@@ -226,6 +233,13 @@ async def _ensure_indexes():
         await retention_check.create_index([("wallet", 1), ("vault", 1)], unique=True)
         await retention_check.create_index("attributed_deposit_id")
         await retention_check.create_index("last_checked_at")
+
+        # AI-generated sub-score explanations. _id is the natural composite key
+        # f"{vault_id}:{dimension}:{YYYY-MM-DD}" so we can't double-generate
+        # within a day. TTL keeps the collection bounded — drop after 14d.
+        score_explanations = _db["score_explanations"]
+        await score_explanations.create_index([("vault_id", 1), ("dimension", 1)])
+        await score_explanations.create_index("generated_at", expireAfterSeconds=14 * 24 * 3600, name="generated_at_ttl_14d")
 
     except Exception as e:
         logger.error(f"MongoDB index creation failed: {e}")

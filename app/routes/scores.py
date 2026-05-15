@@ -20,7 +20,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.services import database
+from app.services import database, score_explainer
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/scores", tags=["scores"])
@@ -159,6 +159,35 @@ async def timeseries(
         "count": len(points),
         "points": points,
     }
+
+
+# --------------------------------------------------------------------------
+# /v1/scores/explain/{vault_id}/{dimension}
+# --------------------------------------------------------------------------
+
+_EXPLAIN_DIMS = ("capital", "performance", "risk", "trust")
+
+
+@router.get("/explain/{vault_id:path}/{dimension}")
+async def explain(vault_id: str, dimension: str):
+    """1-2 sentence AI-generated explanation of a vault's sub-score.
+
+    Cached per (vault_id, dimension, UTC date) in the wallets DB so each unique
+    vault+dimension+day costs at most one Anthropic API call. Falls back to a
+    deterministic template if the API key isn't configured.
+    """
+    if dimension not in _EXPLAIN_DIMS:
+        raise HTTPException(status_code=400, detail=f"dimension must be one of {_EXPLAIN_DIMS}")
+    try:
+        out = await score_explainer.get_or_generate(vault_id, dimension)
+    except LookupError:
+        raise HTTPException(status_code=404, detail=f"No score snapshot for {vault_id}")
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    # ISO-format the timestamp for JSON friendliness
+    if isinstance(out.get("generated_at"), datetime):
+        out["generated_at"] = out["generated_at"].isoformat()
+    return out
 
 
 # --------------------------------------------------------------------------

@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-from app.routes import vaults, quote, status, info, partners, kols, deposits, users, withdraw, positions, scores, intel, applications, admin, og, track, dashboard
+from app.routes import vaults, quote, status, info, partners, kols, deposits, users, withdraw, positions, scores, intel, applications, admin, og, track, dashboard, galxe
 from app.services.vault import load_vaults, get_all_vaults_raw, start_registry_audit_thread
 from app.services import database, min_deposit, status_resolver, withdraw_resolver
 from app.config import get_settings
@@ -182,6 +182,7 @@ app.include_router(admin.router)
 app.include_router(og.router)
 app.include_router(track.router)
 app.include_router(dashboard.router)
+app.include_router(galxe.router)
 
 
 @app.get("/health")

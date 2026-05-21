@@ -90,13 +90,13 @@
   {"address": "0xBeEF086b8807Dc5E5A1740C5E3a7C4c366eA6ab5", "name": "Steakhouse EURC", "chain_id": 8453, "asset": "eurc", "type": "morpho"},
   {"address": "0xbeef009F28cCf367444a9F79096862920e025DC1", "name": "Steakhouse Prime EURC", "chain_id": 8453, "asset": "eurc", "type": "morpho"},
   {"address": "0xaf204776c7245bf4147c2612bf6e5972ee483701", "name": "Spark Savings xDAI", "chain_id": 100, "asset": "wxdai", "type": "morpho"},
-  {"address": "0xEdBC7449a9b594CA4E053D9737EC5Dc4CbCcBfb2", "name": "Aave Gnosis EURe",   "chain_id": 100, "asset": "eure",   "type": "unsupported"},
-  {"address": "0x3FdCeC11B4f15C79d483Aedc56F37D302837Cf4d", "name": "Aave Gnosis GHO",    "chain_id": 100, "asset": "gho",    "type": "unsupported"},
-  {"address": "0xA1Fa064A85266E2Ca82DEe5C5CcEC84DF445760e", "name": "Aave Gnosis GNO",    "chain_id": 100, "asset": "gno",    "type": "unsupported"},
-  {"address": "0xc6B7AcA6DE8a6044E0e32d0c841a89244A10D284", "name": "Aave Gnosis USDC",   "chain_id": 100, "asset": "usdc",   "type": "unsupported"},
-  {"address": "0xC0333cb85B59a788d8C7CAe5e1Fd6E229A3E5a65", "name": "Aave Gnosis USDC.e", "chain_id": 100, "asset": "usdc.e", "type": "unsupported"},
-  {"address": "0xa818F1B57c201E092C4A2017A91815034326Efd1", "name": "Aave Gnosis WETH",   "chain_id": 100, "asset": "weth",   "type": "unsupported"},
-  {"address": "0xd0Dd6cEF72143E22cCED4867eb0d5F2328715533", "name": "Aave Gnosis WXDAI",  "chain_id": 100, "asset": "wxdai",  "type": "unsupported"},
-  {"address": "0x7a5c3860a77a8DC1b225BD46d0fb2ac1C6D191BC", "name": "Aave Gnosis sDAI",   "chain_id": 100, "asset": "sdai",   "type": "unsupported"},
-  {"address": "0x23e4E76D01B2002BE436CE8d6044b0aA2f68B68a", "name": "Aave Gnosis wstETH", "chain_id": 100, "asset": "wsteth", "type": "unsupported"}
+  {"address": "0xEdBC7449a9b594CA4E053D9737EC5Dc4CbCcBfb2", "name": "Aave Gnosis EURe",   "chain_id": 100, "asset": "eure",   "type": "aave", "aave_pool": "0xb50201558B00496A145fE76f7424749556E326D8"},
+  {"address": "0x3FdCeC11B4f15C79d483Aedc56F37D302837Cf4d", "name": "Aave Gnosis GHO",    "chain_id": 100, "asset": "gho",    "type": "aave", "aave_pool": "0xb50201558B00496A145fE76f7424749556E326D8"},
+  {"address": "0xA1Fa064A85266E2Ca82DEe5C5CcEC84DF445760e", "name": "Aave Gnosis GNO",    "chain_id": 100, "asset": "gno",    "type": "aave", "aave_pool": "0xb50201558B00496A145fE76f7424749556E326D8"},
+  {"address": "0xc6B7AcA6DE8a6044E0e32d0c841a89244A10D284", "name": "Aave Gnosis USDC",   "chain_id": 100, "asset": "usdc",   "type": "aave", "aave_pool": "0xb50201558B00496A145fE76f7424749556E326D8"},
+  {"address": "0xC0333cb85B59a788d8C7CAe5e1Fd6E229A3E5a65", "name": "Aave Gnosis USDC.e", "chain_id": 100, "asset": "usdc.e", "type": "aave", "aave_pool": "0xb50201558B00496A145fE76f7424749556E326D8"},
+  {"address": "0xa818F1B57c201E092C4A2017A91815034326Efd1", "name": "Aave Gnosis WETH",   "chain_id": 100, "asset": "weth",   "type": "aave", "aave_pool": "0xb50201558B00496A145fE76f7424749556E326D8"},
+  {"address": "0xd0Dd6cEF72143E22cCED4867eb0d5F2328715533", "name": "Aave Gnosis WXDAI",  "chain_id": 100, "asset": "wxdai",  "type": "aave", "aave_pool": "0xb50201558B00496A145fE76f7424749556E326D8"},
+  {"address": "0x7a5c3860a77a8DC1b225BD46d0fb2ac1C6D191BC", "name": "Aave Gnosis sDAI",   "chain_id": 100, "asset": "sdai",   "type": "aave", "aave_pool": "0xb50201558B00496A145fE76f7424749556E326D8"},
+  {"address": "0x23e4E76D01B2002BE436CE8d6044b0aA2f68B68a", "name": "Aave Gnosis wstETH", "chain_id": 100, "asset": "wsteth", "type": "aave", "aave_pool": "0xb50201558B00496A145fE76f7424749556E326D8"}
 ]

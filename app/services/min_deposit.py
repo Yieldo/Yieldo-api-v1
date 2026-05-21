@@ -204,6 +204,10 @@ def resolve(vault: dict) -> tuple[Optional[int], bool]:
             # picks shares > 0). Truthful answer: no enforced minimum.
             has_no_min = True
 
+        elif vtype == "aave":
+            # Aave V3 Pool.supply() accepts any amount > 0 — no on-chain min.
+            has_no_min = True
+
         elif vtype == "midas":
             # Midas: probe the issuance vault, not the share token. Read the
             # issuance vault address from our router's midasVaults mapping.

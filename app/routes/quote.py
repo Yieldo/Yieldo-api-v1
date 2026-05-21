@@ -356,6 +356,52 @@ async def build_transaction(req: BuildRequest, request: Request):
     # composer path below with vault as the contractCalls target.
     external_router = bool(vault.get("external_router"))
 
+    # Aave V3 vaults bypass our DepositRouter entirely — final call is always
+    # Pool.supply(asset, amount, onBehalfOf, 0) on the Pool address baked into
+    # the vault registry entry. The aToken is just the share balance receipt.
+    # Same-chain → user signs straight to the Pool. Cross-chain → composer
+    # with Pool as the contractCalls target, with a clean two-step fallback
+    # to bridge-then-supply if LiFi can't compose the route.
+    is_aave = vault_type == "aave"
+    aave_pool = vault.get("aave_pool") if is_aave else None
+
+    def _aave_supply_calldata(amount: int) -> str:
+        from web3 import Web3
+        from eth_abi import encode as abi_encode
+        sel = Web3.keccak(text="supply(address,uint256,address,uint16)")[:4].hex()
+        encoded = abi_encode(
+            ["address", "uint256", "address", "uint16"],
+            [Web3.to_checksum_address(to_token), amount,
+             Web3.to_checksum_address(req.user_address), 0],
+        ).hex()
+        return "0x" + sel + encoded
+
+    if is_direct and is_aave and aave_pool:
+        from web3 import Web3
+        calldata = _aave_supply_calldata(from_amount_int)
+        response = BuildResponse(
+            transaction_request=TransactionRequest(
+                to=Web3.to_checksum_address(aave_pool),
+                data=calldata,
+                value="0",
+                chain_id=to_chain,
+                gas_limit="350000",
+            ),
+            approval=ApprovalData(
+                token_address=to_token,
+                spender_address=Web3.to_checksum_address(aave_pool),
+                amount=req.from_amount,
+            ),
+            tracking=TrackingInfo(from_chain_id=to_chain, to_chain_id=to_chain),
+        )
+        tracking_id = await database.save_transaction(
+            req.model_dump(), response.model_dump(),
+            vault_name=vault["name"], referrer=req.referrer,
+            referrer_handle=req.referrer_handle, quote_type="direct-aave",
+        )
+        response.tracking_id = tracking_id
+        return response
+
     if is_direct and external_router:
         # Direct ERC-4626 deposit: vault.deposit(amount, receiver)
         from web3 import Web3
@@ -458,7 +504,14 @@ async def build_transaction(req: BuildRequest, request: Request):
         #    sweeps it via the allowance/balance check.
         SWAP_HINT_BUFFER_BPS = 200  # 2.00%
         cc_amount = int(int(to_amount) * (10000 - SWAP_HINT_BUFFER_BPS) // 10000)
-        if external_router:
+        if is_aave and aave_pool:
+            # Aave: final composer call is Pool.supply(asset, amount, user, 0)
+            # on the V3 Pool address. LiFi bridges + (optionally swaps) to the
+            # destination asset, then invokes this calldata.
+            from web3 import Web3
+            cc_calldata = _aave_supply_calldata(cc_amount)
+            cc_target = Web3.to_checksum_address(aave_pool)
+        elif external_router:
             # No DepositRouter on this chain — call vault.deposit() directly.
             # LiFi will: bridge → swap to deposit asset → call this contract.
             from web3 import Web3
@@ -510,7 +563,21 @@ async def build_transaction(req: BuildRequest, request: Request):
         TWO_STEP_BUFFER_BPS = 200
         dep_amount = int(int(to_amount) * (10000 - TWO_STEP_BUFFER_BPS) // 10000)
 
-        if external_router:
+        if is_aave and aave_pool:
+            # Step 2 calls Pool.supply() on the destination chain. The user
+            # has the bridged underlying in their wallet at this point;
+            # they approve Pool and then sign the supply tx.
+            from web3 import Web3
+            from eth_abi import encode as abi_encode
+            sel = Web3.keccak(text="supply(address,uint256,address,uint16)")[:4].hex()
+            dep_calldata = "0x" + sel + abi_encode(
+                ["address", "uint256", "address", "uint16"],
+                [Web3.to_checksum_address(to_token), dep_amount,
+                 Web3.to_checksum_address(req.user_address), 0],
+            ).hex()
+            dep_target = Web3.to_checksum_address(aave_pool)
+            dep_gas = "350000"
+        elif external_router:
             # Step 2 calls vault.deposit() directly on the destination chain.
             from web3 import Web3
             from eth_abi import encode as abi_encode

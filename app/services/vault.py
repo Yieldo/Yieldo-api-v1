@@ -119,6 +119,9 @@ def load_vaults():
             # where we haven't deployed yet (e.g. Spark Savings xDAI on Gnosis).
             "external_router": bool(v.get("external_router", False)),
             "type": v.get("type", "morpho"),
+            # Aave V3 vaults: aToken is the share-balance receipt but deposits
+            # call Pool.supply() on the V3 Pool address. Stored per-entry.
+            "aave_pool": v.get("aave_pool"),
             "min_deposit": v.get("min_deposit"),
             "curator": v.get("curator"),
             "paused": bool(v.get("paused", False)),

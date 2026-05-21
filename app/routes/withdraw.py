@@ -121,6 +121,11 @@ async def withdraw_quote(req: WithdrawQuoteRequest):
             status_code=400,
             detail=f"Withdrawals for {vault['name']} must be done via Veda's website.",
         )
+    if vault_type == "aave":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Withdrawals for {vault['name']} must be done via Aave's app.",
+        )
     if vault_type == "ipor" or vault_type == "lido":
         # IPOR leveraged Plasma Vaults and Lido Earn vaults have no instant-redeem
         # liquidity for direct ERC-4626 redeem(). They require the protocol's

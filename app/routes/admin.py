@@ -255,7 +255,7 @@ def _default_state(vault_id: str) -> dict:
 # Unifying with the registry like this means the admin page reflects what
 # users actually experience, no duplicate "is it on?" sources.
 _DEPOSITS_HARD_LOCK_TYPES = {"unsupported"}
-_WITHDRAWALS_HARD_LOCK_TYPES = {"unsupported", "veda", "ipor", "lido"}
+_WITHDRAWALS_HARD_LOCK_TYPES = {"unsupported", "veda", "ipor", "lido", "aave"}
 
 
 def _registry_locks(vault: dict) -> dict:

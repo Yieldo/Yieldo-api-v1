@@ -274,7 +274,10 @@ async def check_cache(vault_id: str, dimension: str) -> Optional[dict]:
         return None
     cache_id = f"{vault_id}:{dimension}:{_day_key()}"
     existing = await wallets_db["score_explanations"].find_one({"_id": cache_id})
-    if existing and existing.get("explanation"):
+    # Ignore poisoned template entries (a prior CLI failure) — treat as a
+    # cache miss so the request retries the CLI instead of serving the
+    # "AI unavailable" placeholder all day.
+    if existing and existing.get("explanation") and existing.get("source") != "template":
         return {
             "vault_id": vault_id,
             "dimension": dimension,
@@ -338,7 +341,12 @@ async def generate_fresh(vault_id: str, dimension: str) -> dict:
         "source": source,
         "generated_at": now,
     }
-    if wallets_db is not None:
+    # Only persist genuine CLI-generated explanations. A `template` fallback
+    # means the CLI failed (timeout, transient error) — caching it would
+    # poison the (vault, dim, day) key and serve the "AI unavailable"
+    # placeholder for the rest of the UTC day. Skip caching so the next
+    # request retries the CLI.
+    if wallets_db is not None and source == "claude_cli":
         try:
             await wallets_db["score_explanations"].update_one(
                 {"_id": cache_id}, {"$set": doc}, upsert=True

@@ -444,20 +444,42 @@ async def add_invite_codes(codes: list[str], note: str = "") -> int:
 
 
 async def verify_invite_code(code: str) -> dict | None:
-    """Verify an invite code. Returns the doc if valid + not used, else None."""
+    """Verify an invite code. Returns the doc if valid, else None.
+
+    Single-use codes are valid only while unused. Reusable codes (shared
+    early-access, `reusable: True`) stay valid regardless of past redemptions.
+    """
     if _db is None:
         return None
-    doc = await _db["creator_invite_codes"].find_one({"code": code.upper(), "used": False})
-    return doc
+    code = code.upper()
+    doc = await _db["creator_invite_codes"].find_one({"code": code, "reusable": True})
+    if doc:
+        return doc
+    return await _db["creator_invite_codes"].find_one({"code": code, "used": False})
 
 
 async def consume_invite_code(code: str, address: str) -> bool:
-    """Mark an invite code as used by this address."""
+    """Redeem an invite code by this address.
+
+    Reusable codes are never burned — we just record the redemption count and
+    redeemers. Single-use codes flip to used.
+    """
     if _db is None:
         return False
+    code = code.upper()
+    now = datetime.now(timezone.utc)
+    doc = await _db["creator_invite_codes"].find_one({"code": code})
+    if doc and doc.get("reusable"):
+        await _db["creator_invite_codes"].update_one(
+            {"code": code},
+            {"$inc": {"redemptions": 1},
+             "$addToSet": {"redeemed_by": address.lower()},
+             "$set": {"last_redeemed_at": now}},
+        )
+        return True
     result = await _db["creator_invite_codes"].update_one(
-        {"code": code.upper(), "used": False},
-        {"$set": {"used": True, "used_by": address.lower(), "used_at": datetime.now(timezone.utc)}},
+        {"code": code, "used": False},
+        {"$set": {"used": True, "used_by": address.lower(), "used_at": now}},
     )
     return result.modified_count > 0
 

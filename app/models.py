@@ -440,6 +440,8 @@ class KolRegisterResponse(BaseModel):
     handle: str
     name: str
     created_at: str
+    session_token: Optional[str] = None
+    expires_at: Optional[str] = None
 
 
 class KolLoginRequest(BaseModel):

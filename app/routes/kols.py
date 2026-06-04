@@ -164,11 +164,20 @@ async def register(req: KolRegisterRequest):
     if invite_code and invite_doc:
         await database.consume_invite_code(invite_code, req.address)
 
+    # Issue a session token right away — the register signature already proves
+    # wallet ownership, so the FE can land on the dashboard without a second
+    # login signature.
+    token = generate_session_token()
+    expires = datetime.now(timezone.utc) + timedelta(hours=SESSION_DURATION_HOURS)
+    await database.save_kol_session(hash_key(token), req.address, expires)
+
     return KolRegisterResponse(
         address=kol["address"],
         handle=kol["handle"],
         name=kol["name"],
         created_at=kol["created_at"].isoformat(),
+        session_token=token,
+        expires_at=expires.isoformat(),
     )
 
 

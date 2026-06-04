@@ -43,6 +43,8 @@ def _resolve_claude_bin() -> Optional[str]:
     if not found:
         for candidate in (
             os.path.expanduser("~/.local/bin/claude"),
+            os.path.expanduser("~/.npm-global/bin/claude"),  # npm global prefix (AWS box)
+            "/home/elliot37/.npm-global/bin/claude",
             "/usr/local/bin/claude",
             "/opt/claude/bin/claude",
             "/home/elliot37/.local/bin/claude",

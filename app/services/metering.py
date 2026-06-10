@@ -46,8 +46,13 @@ def record(chain_id: int, method: str, provider: str) -> None:
 
 def _metrics_db():
     # Write to the indexer DB so all services share one rpc_metrics collection.
+    # NB: Motor/PyMongo Database objects reject truth-testing, so compare to
+    # None explicitly rather than using `or`.
     from app.services import database
-    return getattr(database, "_indexer_db", None) or getattr(database, "_db", None)
+    idb = getattr(database, "_indexer_db", None)
+    if idb is not None:
+        return idb
+    return getattr(database, "_db", None)
 
 
 async def flush() -> None:

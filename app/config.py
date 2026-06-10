@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     hyperliquid_rpc_url: str = "https://rpc.hyperliquid.xyz/evm"
     katana_rpc_url: str = "https://rpc.katanarpc.com"
     gnosis_rpc_url: str = "https://rpc.gnosischain.com"
+    # Paid Tatum gateway key — sent as the x-api-key header for the urgent
+    # user-path reads (mainnet/base/monad), with the public node as fallback.
+    # Set in .env on the VPS only; never commit a real value.
+    tatum_api_key: str = ""
     mongodb_url: str = ""
     # The indexer (indexer-v1) writes to a different Mongo cluster — score
     # endpoints read from that cluster. If not set, falls back to mongodb_url.

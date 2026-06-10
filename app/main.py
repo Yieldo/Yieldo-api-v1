@@ -134,14 +134,21 @@ async def lifespan(app: FastAPI):
         # mining sees "Pending" forever.
         resolver_task = asyncio.create_task(status_resolver.run_loop())
         withdraw_resolver_task = asyncio.create_task(withdraw_resolver.run_loop())
+        # Periodically flush RPC usage counters to the shared rpc_metrics
+        # collection and refresh the paid-RPC budget gate.
+        from app.services import metering
+        metering_task = asyncio.create_task(metering.run_loop())
     else:
         resolver_task = None
         withdraw_resolver_task = None
+        metering_task = None
     yield
     if resolver_task:
         resolver_task.cancel()
     if withdraw_resolver_task:
         withdraw_resolver_task.cancel()
+    if metering_task:
+        metering_task.cancel()
     await database.disconnect()
 
 

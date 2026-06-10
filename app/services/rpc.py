@@ -1,5 +1,7 @@
+import requests
 from web3 import Web3
 from web3.contract import Contract
+from web3.providers.base import JSONBaseProvider
 from eth_account import Account
 from eth_account.messages import encode_typed_data
 from app.config import get_settings
@@ -12,6 +14,68 @@ from app.core.constants import (
 )
 
 _providers: dict[int, Web3] = {}
+
+# Backend reads are the urgent user path (deposit/withdraw/quote), so for these
+# chains Tatum is the PRIMARY endpoint with the public node as fallback. The API
+# key is sent as an x-api-key header (never in a URL) and read only from the
+# TATUM_API_KEY env — never hardcoded, never returned by any endpoint.
+TATUM_HOSTS = {
+    1:    "https://ethereum-mainnet.gateway.tatum.io",
+    8453: "https://base-mainnet.gateway.tatum.io",
+    143:  "https://monad-mainnet.gateway.tatum.io",
+}
+RPC_TIMEOUT_SEC = 15
+
+
+def _is_tatum(url: str) -> bool:
+    return ".gateway.tatum.io" in (url or "")
+
+
+class MeteredFallbackProvider(JSONBaseProvider):
+    """Tries each endpoint in order until one succeeds; meters every call.
+    `endpoints` is a list of (url, headers|None, label). Tatum endpoints are
+    skipped when the monthly budget guard says so (falls through to public)."""
+
+    def __init__(self, chain_id: int, endpoints: list):
+        super().__init__()
+        self.chain_id = chain_id
+        self.endpoints = endpoints
+        self._session = requests.Session()
+
+    def make_request(self, method, params):
+        from app.services import metering
+        data = self.encode_rpc_request(method, params)
+        last_exc = None
+        for url, headers, label in self.endpoints:
+            if label == "tatum" and not metering.tatum_allowed("P0"):
+                continue
+            try:
+                metering.record(self.chain_id, method, label)
+                h = {"Content-Type": "application/json"}
+                if headers:
+                    h.update(headers)
+                resp = self._session.post(url, data=data, headers=h, timeout=RPC_TIMEOUT_SEC)
+                resp.raise_for_status()
+                return self.decode_rpc_response(resp.content)
+            except Exception as e:  # noqa: BLE001 — fall through to next endpoint
+                last_exc = e
+                continue
+        raise last_exc or RuntimeError(f"all RPC endpoints failed for chain {self.chain_id}")
+
+    def is_connected(self, show_traceback: bool = False) -> bool:
+        try:
+            self.make_request("web3_clientVersion", [])
+            return True
+        except Exception:
+            return False
+
+
+def _endpoints_for(chain_id: int, public_url: str, api_key: str) -> list:
+    eps = []
+    if chain_id in TATUM_HOSTS and api_key:
+        eps.append((TATUM_HOSTS[chain_id], {"x-api-key": api_key}, "tatum"))
+    eps.append((public_url, None, "public"))
+    return eps
 
 
 def get_w3(chain_id: int) -> Web3:
@@ -31,7 +95,7 @@ def get_w3(chain_id: int) -> Web3:
     url = rpc_map.get(chain_id)
     if not url:
         raise ValueError(f"No RPC configured for chain {chain_id}")
-    w3 = Web3(Web3.HTTPProvider(url))
+    w3 = Web3(MeteredFallbackProvider(chain_id, _endpoints_for(chain_id, url, settings.tatum_api_key)))
     _providers[chain_id] = w3
     return w3
 

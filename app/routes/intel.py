@@ -251,14 +251,23 @@ def _dimension_filter_query(dimension: Optional[str]) -> dict:
 # --------------------------------------------------------------------------
 
 def _time_window_query(cutoff: datetime) -> dict:
-    """Match signals whose latest activity (last_seen) falls within the window.
+    """Match signals whose latest activity (last_seen) falls within the window
+    AND that haven't been marked resolved (vault recovered the condition).
     Falls back to `ts` for pre-coalescing docs that lack last_seen. This is
     what makes incidents that are still being refreshed stay visible across
     day boundaries: their last_seen keeps moving even though ts is fixed."""
-    return {"$or": [
-        {"last_seen": {"$gte": cutoff}},
-        {"last_seen": {"$exists": False}, "ts": {"$gte": cutoff}},
-    ]}
+    return {
+        "$and": [
+            {"$or": [
+                {"last_seen": {"$gte": cutoff}},
+                {"last_seen": {"$exists": False}, "ts": {"$gte": cutoff}},
+            ]},
+            # Exclude signals whose underlying condition has recovered.
+            # `resolved_at` is set by intel.resolve_recovered_signals() at
+            # cycle end when the dimension is back within tolerance.
+            {"resolved_at": {"$exists": False}},
+        ],
+    }
 
 
 def _dedup_pipeline(match: dict, sort: list[tuple[str, int]], skip: int, limit: int) -> list[dict]:

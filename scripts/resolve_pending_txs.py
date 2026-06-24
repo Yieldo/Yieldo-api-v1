@@ -44,7 +44,8 @@ RPCS = {
     747474: "https://rpc.katana.network",
 }
 
-ABANDON_HOURS = 24   # records w/o tx_hash older than this -> abandoned
+ABANDON_HOURS = 4   # records w/o tx_hash older than this -> abandoned (quotes don't outlive a few hours)
+STALE_CROSSCHAIN_HOURS = 24  # cross-chain records LiFi can't resolve after this -> trust source receipt
 LIFI_STATUS_URL = "https://li.quest/v1/status"
 
 
@@ -131,24 +132,37 @@ async def main():
             extra = {}
             if from_chain and to_chain and from_chain != to_chain:
                 ls = await lifi_status(client, tx_hash, from_chain, to_chain)
+                resolved_via_lifi = False
                 if ls:
                     s = ls.get("status")
                     sub = ls.get("substatus")
                     if s == "DONE" and sub == "COMPLETED":
-                        new_status = "completed"
+                        new_status = "completed"; resolved_via_lifi = True
                     elif s == "DONE" and sub in ("PARTIAL", "REFUNDED"):
-                        new_status = "partial"
+                        new_status = "partial"; resolved_via_lifi = True
                         rcv = ls.get("receiving") or {}
                         extra["dest_tx_hash"] = rcv.get("txHash")
                         extra["dest_chain_id"] = to_chain
                         extra["received_token"] = (rcv.get("token") or {}).get("address")
                         extra["received_amount"] = rcv.get("amount")
                     elif s == "FAILED":
-                        new_status = "failed"
-                    else:
-                        n_left += 1
-                        continue
-                else:
+                        new_status = "failed"; resolved_via_lifi = True
+                # Fallback for old cross-chain records LiFi has dropped/never had:
+                # check the source receipt. If source reverted -> failed. If source
+                # confirmed and the record is >24h old, trust that the bridge settled
+                # (Across/Stargate typically deliver within minutes) and mark completed.
+                if not resolved_via_lifi:
+                    rpc = RPCS.get(from_chain)
+                    if rpc:
+                        receipt = await rpc_get_receipt(rpc, tx_hash, client)
+                        if receipt and receipt.get("status") == "0x0":
+                            new_status = "failed"
+                        elif receipt and receipt.get("status") == "0x1":
+                            age_h = (datetime.now(timezone.utc) - created).total_seconds() / 3600
+                            if age_h > STALE_CROSSCHAIN_HOURS:
+                                new_status = "completed"
+                                extra["resolution_note"] = "Source confirmed; LiFi data unavailable. Status assumed from source receipt."
+                if not new_status:
                     n_left += 1
                     continue
             else:

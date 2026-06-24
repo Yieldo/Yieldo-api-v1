@@ -207,7 +207,15 @@ def _fetch_registry_entry(chain_id: int, addr: str) -> dict | None:
 
 def _refresh_registry() -> None:
     try:
-        with urllib.request.urlopen(PUBLIC_REGISTRY_URL, timeout=8) as resp:
+        # A real User-Agent is required (app.yieldo.xyz's edge returns 403 to the
+        # default python-urllib UA) and the fetch from the API host can be slow,
+        # so use a generous timeout. Without this the registry-fallback stays
+        # empty and any vault not in data/vaults.json 404s on deposit.
+        req = urllib.request.Request(
+            PUBLIC_REGISTRY_URL,
+            headers={"User-Agent": "Mozilla/5.0 (yieldo-api registry-sync)", "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=20) as resp:
             data = json.load(resp)
         for entry in data:
             vid = (entry.get("vault_id") or "").lower()

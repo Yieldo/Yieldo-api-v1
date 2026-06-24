@@ -18,14 +18,14 @@ router = APIRouter(prefix="/v1/users", tags=["users"])
 # expired." 48h covers an overnight close + next-day reopen for the common
 # case, and the sliding-window extension below keeps active users signed in
 # indefinitely while still cutting off truly idle wallets.
-SESSION_DURATION_HOURS = 48
+SESSION_DURATION_HOURS = 720  # 30 days — wallet apps shouldn't nag for re-sign
 
 # When an authenticated request comes in and the remaining lifetime is below
-# this threshold, bump the session back to a full 48h. This implements the
-# "rolling expiry": every page reload / API call within the last day of the
-# window pushes the expiry forward. We don't bump on every call (would write
-# to Mongo on every request) — only when the remaining TTL drops below this.
-SESSION_REFRESH_THRESHOLD_HOURS = 24
+# this threshold, bump the session back to a full 30 days. This implements the
+# "rolling expiry": every page reload / API call within the window pushes the
+# expiry forward, so active users stay signed in indefinitely. We don't bump on
+# every call (would write to Mongo on every request) — only below this floor.
+SESSION_REFRESH_THRESHOLD_HOURS = 360
 
 
 async def get_current_user(request: Request) -> dict:

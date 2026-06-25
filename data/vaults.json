@@ -109,5 +109,11 @@
   {"address": "0x050ce30b927Da55177a4914ec73480238bAD56F0", "name": "Gauntlet USDC Prime",            "chain_id": 8453, "asset": "usdc",  "type": "morpho"},
   {"address": "0x0bf0164D17469241B6E086da4016DcC54FEAa334", "name": "Alpha USDC Delta",               "chain_id": 1,    "asset": "usdc",  "type": "morpho"},
   {"address": "0x43FCd85E8d9D003d515f886891b7C742aC9F92dA", "name": "Gauntlet WETH Prime",            "chain_id": 1,    "asset": "weth",  "type": "morpho"},
-  {"address": "0x093272C07700d3ca5301c3bF9b3a392624179e2F", "name": "Hyperithm USDC Apex",            "chain_id": 1,    "asset": "usdc",  "type": "morpho"}
+  {"address": "0x093272C07700d3ca5301c3bF9b3a392624179e2F", "name": "Hyperithm USDC Apex",            "chain_id": 1,    "asset": "usdc",  "type": "morpho"},
+
+  {"address": "0xe883426b4fC84a7f5cc86415caBbEf43e73a4Cc8", "name": "TAU cbETH Dynamic Looping",      "chain_id": 8453, "asset": "cbeth", "type": "ipor"},
+  {"address": "0x0b45a1e71A8A09f5d382FeD27202d50ed983AAf3", "name": "Hyperithm mHYPER Looping",       "chain_id": 1,    "asset": "usdc",  "type": "ipor"},
+  {"address": "0xf8f226da66244F89e70C5b5D1a5C5b0D505EB1D8", "name": "Bitcoin Dollar USDC",            "chain_id": 1,    "asset": "usdc",  "type": "ipor"},
+  {"address": "0xdf8A0D3C90462C4c9b5A8697C119Fa67Cb84a874", "name": "Prime HELOC Loop",               "chain_id": 1,    "asset": "pyusd", "type": "ipor"},
+  {"address": "0x5900c3b72458f12967dc1bef35b92d271f5cDbc1", "name": "Clearstar Base cbETH Looper",    "chain_id": 8453, "asset": "weth",  "type": "ipor"}
 ]
